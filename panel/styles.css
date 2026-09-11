@@ -1,6 +1,6 @@
 :root {
   color-scheme: dark;
-  --bg: #17181b;
+  --bg: #000000;
   --card: #1e2024;
   --card-nested: #24262b;
   --border: #2c2f35;
@@ -8,8 +8,15 @@
   --muted: #8b8f98;
   --muted-2: #64686f;
   --accent: #7c8cff;
-  --green: #3fd67c;
-  --amber: #e8a33d;
+  /* Working/attention/done pulled directly from Orca's own theme — read out
+     of its bundled AgentStateDot component and the --color-yellow-500 /
+     --color-orange-500 / --color-emerald-500 tokens behind it, not guessed.
+     Orca's own state labels: working = yellow (its spinner border colour),
+     needs attention ("permission"/"waiting") = orange (its question-bubble
+     icon colour), done = emerald green (its check-circle icon colour). */
+  --working: #edb200;
+  --amber: #fe6e00;
+  --green: #00bb7f;
   --red: #e0574f;
   --gray-dot: #565a62;
 }
@@ -26,43 +33,345 @@ html, body {
   -webkit-font-smoothing: antialiased;
 }
 
-#topbar {
+#hero {
   position: sticky;
   top: 0;
   z-index: 5;
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  padding: 14px 16px;
-  padding-top: max(14px, env(safe-area-inset-top));
-  background: color-mix(in srgb, var(--bg) 92%, transparent);
-  backdrop-filter: blur(8px);
+  padding: 18px 24px;
+  padding-top: 18px;
+  padding-top: max(18px, env(safe-area-inset-top));
+  background: var(--bg);
   border-bottom: 1px solid var(--border);
 }
+#hero[hidden] { display: none; }
 
-#topbar-title {
+/* Same max-width/centering as #app below, so the mascot centers on the
+   CONTENT column (matching the sessions/usage area), not the raw viewport
+   edges — #hero itself stays full-bleed for its background/border. */
+.hero-inner {
+  position: relative;
+  max-width: 1140px;
+  margin: 0 auto;
   display: flex;
   align-items: center;
-  gap: 8px;
-  font-weight: 600;
-  font-size: 17px;
+  justify-content: flex-end;
+  gap: 20px;
 }
 
-.orca-mark { font-size: 18px; }
+/* The mascot centers on the content column itself rather than sitting in
+   the flex flow beside the clock — taken out of flow so the clock (the
+   only remaining flex child) still pins to the right via justify-content. */
+#mascot-wrap {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  transform: translate(-50%, -50%);
+}
 
 .muted { color: var(--muted); }
 
-#topbar-status.stale { color: var(--amber); }
-#topbar-status.dead { color: var(--red); }
+#mascot-wrap { flex: none; }
+.mascot-wrap { position: relative; }
+
+.orca-mascot { width: 78px; height: 74px; overflow: visible; display: block; }
+
+/* Fixed white, always — the mascot's color no longer carries state (the
+   icon beside the clock does that); only its motion still does. */
+.orca-mascot .px rect,
+.orca-mascot .tail rect,
+.orca-mascot .fins rect { fill: var(--text); }
+.orca-mascot .eyes-open rect,
+.orca-mascot .eyes-worried rect { fill: var(--bg); }
+.orca-mascot .eyes-sleep rect { fill: var(--bg); }
+.orca-mascot .zzz rect { fill: var(--muted-2); }
+
+/* Eyes: open by default, swapped by mood exactly like the crab's — the OFF
+   state is a bare rule so only a mood-scoped rule can ever turn one on. */
+.eyes { display: none; }
+.eyes-open { display: block; }
+.orca-mascot[data-mood="idle"] .eyes-open { display: none; }
+.orca-mascot[data-mood="idle"] .eyes-sleep { display: block; }
+.orca-mascot[data-mood="attn"] .eyes-open { display: none; }
+.orca-mascot[data-mood="attn"] .eyes-worried { display: block; }
+
+.zzz { display: none; }
+.orca-mascot[data-mood="idle"] .zzz { display: block; }
+
+/* Movement, in the crab's own grammar: a continuous loop for a standing
+   mood (working bobs, attention shivers), a short triggered hop for the
+   moment work finishes — never a smooth tween, always a whole-animal move. */
+.orca-mascot[data-mood="working"] .rig { animation: orcaSwim 1.8s ease-in-out infinite; }
+@keyframes orcaSwim {
+  0%, 100% { transform: translateY(0) rotate(0deg); }
+  50% { transform: translateY(-3px) rotate(-2deg); }
+}
+
+.orca-mascot[data-mood="working"] .tail { animation: orcaTailWag 0.9s ease-in-out infinite; transform-origin: 16px 24px; }
+.orca-mascot[data-mood="working"] .fins { animation: orcaFinFlap 0.9s ease-in-out infinite; }
+@keyframes orcaFinFlap {
+  0%, 100% { transform: translateY(0); }
+  50% { transform: translateY(-1.5px); }
+}
+@keyframes orcaTailWag {
+  0%, 100% { transform: rotate(0deg); }
+  50% { transform: rotate(8deg); }
+}
+
+.orca-mascot[data-mood="attn"] .rig { animation: orcaShiver 0.5s ease-in-out infinite; }
+@keyframes orcaShiver {
+  0%, 100% { transform: translateX(0); }
+  25% { transform: translateX(-1.5px); }
+  75% { transform: translateX(1.5px); }
+}
+
+/* One-shot: fires when the last working session lands with nothing waiting
+   — the same trigger condition as the crab's own bounce. */
+.orca-mascot.bounce .rig { animation: orcaHop 380ms steps(1, end) 2; }
+@keyframes orcaHop {
+  0%, 100% { transform: translateY(0); }
+  50% { transform: translateY(-6px); }
+}
+
+/* Needs-attention decoration: the orange question bubble floating beside
+   the mascot, so the mood reads at a glance and not just from a subtle
+   shiver + eye shape. */
+.orca-decoration { position: absolute; display: none; pointer-events: none; }
+.orca-chat { top: -8px; right: -14px; color: var(--text); }
+.orca-chat svg { width: 24px; height: 24px; }
+.mascot-wrap[data-mood="attn"] .orca-chat { display: block; animation: orcaChatPop 1.1s ease-in-out infinite; }
+@keyframes orcaChatPop {
+  0%, 100% { transform: scale(1) translateY(0); }
+  50% { transform: scale(1.18) translateY(-3px); }
+}
+
+/* Working→Done splash: a handful of blue droplets bursting out from BELOW
+   the mascot and fading, as if it had just dropped into water, on top of
+   the two hops. Anchored at the wrap's bottom edge (not its center) and
+   thrown outward and up — outside the silhouette, not through it. */
+.orca-splash { inset: 0; display: block; }
+.orca-splash .drop {
+  position: absolute;
+  top: 100%;
+  left: 50%;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: #4fa8e8;
+  opacity: 0;
+}
+.orca-splash .drop:nth-child(1) { --dx: -24px; --dy: -12px; }
+.orca-splash .drop:nth-child(2) { --dx: 22px; --dy: -18px; }
+.orca-splash .drop:nth-child(3) { --dx: -13px; --dy: -2px; }
+.orca-splash .drop:nth-child(4) { --dx: 15px; --dy: -6px; }
+.mascot-wrap.bounce .orca-splash .drop {
+  animation: orcaSplashPop 700ms ease-out;
+}
+.orca-splash .drop:nth-child(2) { animation-delay: 40ms; }
+.orca-splash .drop:nth-child(3) { animation-delay: 80ms; }
+.orca-splash .drop:nth-child(4) { animation-delay: 20ms; }
+@keyframes orcaSplashPop {
+  0% { opacity: 1; transform: translate(-50%, -50%) translate(0, 0) scale(0.5); }
+  100% { opacity: 0; transform: translate(-50%, -50%) translate(var(--dx), var(--dy)) scale(1); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .orca-mascot .rig, .orca-mascot .tail, .orca-mascot .fins, .orca-mascot.bounce .rig,
+  .orca-chat, .orca-splash .drop { animation: none !important; }
+}
+
+#clock { flex: none; text-align: right; }
+
+.clock-row {
+  font-variant-numeric: tabular-nums;
+  font-family: ui-monospace, "SF Mono", Menlo, monospace;
+}
+#clock-hm { font-size: 32px; font-weight: 700; }
+#clock-ss { font-size: 16px; color: var(--muted-2); margin-left: 3px; }
+
+#clock-date {
+  margin-top: 3px;
+  font-size: 13.5px;
+  color: var(--muted);
+}
+
+#hero-state {
+  margin-top: 6px;
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 6px;
+  font-size: 13px;
+  font-weight: 600;
+}
+#hero-state.working { color: var(--working); }
+#hero-state.attn { color: var(--amber); }
+#hero-state.done { color: var(--green); }
+#hero-state.idle { color: var(--muted); }
+#hero-state:empty { display: none; }
+
+#hero-status { margin-top: 4px; font-size: 12.5px; }
+#hero-status.stale { color: var(--amber); }
+#hero-status.dead { color: var(--red); }
+
+/* ------------------------------------------------------------ state icons */
+
+/* The exact elements Orca's own AgentStateDot component uses (checked
+   against its bundled source): a spinning ring for working, a question-
+   bubble for needs attention, a check-circle for done — not a reinterpreted
+   pixel-art version, since these should read as the SAME status language a
+   viewer already knows from Orca itself. */
+.state-icon { flex: none; display: inline-block; }
+
+.spin-ring {
+  width: 13px;
+  height: 13px;
+  border-radius: 50%;
+  border: 2px solid var(--working);
+  border-top-color: transparent;
+  animation: stateSpin 0.7s linear infinite;
+}
+@keyframes stateSpin { to { transform: rotate(360deg); } }
+
+svg.state-icon {
+  width: 15px;
+  height: 15px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 2.2;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+.icon-chat { color: var(--amber); }
+.icon-check { color: var(--green); }
+
+.dot-plain {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--gray-dot);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .spin-ring { animation: none; border-top-color: var(--working); }
+}
+
+.card-state {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+}
+.card-state .state-icon { width: 14px; height: 14px; }
+.card-state .spin-ring { width: 12px; height: 12px; }
+
+/* ------------------------------------------------------------ layout */
 
 #app {
-  padding: 12px 12px 32px;
-  padding-bottom: max(32px, env(safe-area-inset-bottom));
-  max-width: 720px;
+  padding: 24px;
+  padding-bottom: max(24px, env(safe-area-inset-bottom));
+  max-width: 1140px;
   margin: 0 auto;
   display: flex;
+  gap: 28px;
+  align-items: flex-start;
+}
+#app[hidden] { display: none; }
+
+#usage {
+  flex: none;
+  width: 260px;
+  position: sticky;
+  top: 84px;
+  max-height: calc(100vh - 104px);
+  overflow-y: auto;
+  display: flex;
   flex-direction: column;
+  gap: 14px;
+  padding-right: 28px;
+  border-right: 1px solid var(--border);
+}
+
+#usage-list {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+#sessions {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+}
+
+#sessions-head {
+  position: sticky;
+  top: 84px;
+  z-index: 3;
+  display: flex;
+  align-items: center;
   gap: 10px;
+  background: var(--bg);
+  padding: 4px 0;
+  min-width: 0;
+}
+
+.panel-label {
+  font-weight: 700;
+  font-size: 13px;
+  letter-spacing: .02em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+
+.session-count {
+  color: var(--muted-2);
+  font-size: 12.5px;
+  font-family: ui-monospace, "SF Mono", Menlo, monospace;
+}
+
+.chip-btn {
+  margin-left: auto;
+  border: 1px solid var(--border);
+  background: var(--card);
+  color: var(--text);
+  font-size: 12.5px;
+  font-weight: 600;
+  padding: 6px 12px;
+  border-radius: 999px;
+  cursor: pointer;
+}
+
+.chip-btn[data-filter="working"] { color: var(--working); border-color: color-mix(in srgb, var(--working) 40%, var(--border)); }
+.chip-btn[data-filter="attention"] { color: var(--amber); border-color: color-mix(in srgb, var(--amber) 40%, var(--border)); }
+.chip-btn[data-filter="done"] { color: var(--green); border-color: color-mix(in srgb, var(--green) 40%, var(--border)); }
+
+#cards {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 20px;
+  min-width: 0;
+}
+
+@media (max-width: 560px) {
+  #cards { grid-template-columns: 1fr; }
+}
+
+@media (max-width: 760px) {
+  #app { flex-direction: column; align-items: stretch; gap: 20px; }
+  #usage {
+    width: 100%;
+    position: static;
+    max-height: none;
+    flex-direction: column;
+    padding-right: 0;
+    padding-bottom: 16px;
+    border-right: none;
+    border-bottom: 1px solid var(--border);
+  }
+  #usage-list { flex-direction: row; flex-wrap: wrap; }
+  #usage .gauge { flex: 1 1 200px; }
+  #sessions-head { top: 0; }
 }
 
 .empty-state {
@@ -71,18 +380,100 @@ html, body {
   padding: 40px 12px;
 }
 
-.card {
-  background: var(--card);
-  border: 1px solid var(--border);
-  border-radius: 12px;
-  padding: 12px 14px;
+.empty-state.small { padding: 16px 8px; font-size: 13px; }
+
+/* ------------------------------------------------------------ usage gauges */
+
+/* No card chrome here on purpose — these sit directly on the page
+   background, distinct from the (bordered) session cards. */
+.gauge {
+  background: none;
+  border: none;
+  padding: 0;
+}
+
+.gauge-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+  font-size: 12.5px;
+}
+
+.gauge-name { color: var(--text); font-weight: 600; text-transform: capitalize; }
+.gauge-pct { color: var(--muted); font-family: ui-monospace, "SF Mono", Menlo, monospace; }
+
+.gauge-track {
+  margin-top: 6px;
+  height: 6px;
+  border-radius: 999px;
+  background: var(--card-nested);
   overflow: hidden;
 }
 
+.gauge-fill {
+  height: 100%;
+  border-radius: 999px;
+  background: var(--accent);
+}
+.gauge-fill.warn { background: var(--amber); }
+.gauge-fill.danger { background: var(--red); }
+
+.gauge-foot {
+  margin-top: 4px;
+  font-size: 11px;
+  color: var(--muted-2);
+}
+
+/* ------------------------------------------------------------ session cards (compact) */
+
+.card {
+  background: transparent;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 14px 16px;
+  cursor: pointer;
+  min-width: 0;
+}
+
+.card:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+
+/* Needs-attention cards blink their BORDER — the one state urgent enough to
+   draw the eye on its own. Working no longer does (per feedback: it read as
+   just as alarming as an actual attention case); the bold "Working" text and
+   its icon already say so without the card itself flashing. */
+.card.attn {
+  animation: cardBorderPulse 1.2s ease-in-out infinite;
+  --pulse-color: var(--amber);
+  --pulse-glow: rgba(254, 110, 0, 0.55);
+}
+
+@keyframes cardBorderPulse {
+  0%, 100% { border-color: var(--border); box-shadow: 0 0 0 0 transparent; }
+  50% { border-color: var(--pulse-color); box-shadow: 0 0 0 3px var(--pulse-glow); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .card.attn { animation: none; border-color: var(--pulse-color); }
+}
+
+/* The first, boldest thing on the card: the state word itself, in its own
+   colour — read before the session name below it, not after. */
+.card-state {
+  font-weight: 700;
+  font-size: 13.5px;
+  letter-spacing: .01em;
+  color: var(--muted);
+}
+.card-state.working { color: var(--working); }
+.card-state.attn { color: var(--amber); }
+.card-state.done { color: var(--green); }
+
 .card-head {
+  margin-top: 6px;
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: 10px;
   min-width: 0;
 }
 
@@ -93,8 +484,13 @@ html, body {
   border-radius: 50%;
   background: var(--gray-dot);
 }
-.dot.on { background: var(--green); box-shadow: 0 0 0 3px color-mix(in srgb, var(--green) 25%, transparent); }
-.dot.attn { background: var(--amber); box-shadow: 0 0 0 3px color-mix(in srgb, var(--amber) 25%, transparent); }
+.dot.working { background: var(--working); box-shadow: 0 0 0 3px rgba(237, 178, 0, 0.25); }
+.dot.attn { background: var(--amber); box-shadow: 0 0 0 3px rgba(254, 110, 0, 0.25); }
+.dot.done { background: var(--green); box-shadow: 0 0 0 3px rgba(0, 187, 127, 0.25); }
+
+.card-logo { flex: none; }
+.card-logo[hidden] { display: none; }
+.card-logo .agent-logo { width: 18px; height: 18px; border-radius: 5px; margin-top: 0; }
 
 .card-title {
   font-weight: 600;
@@ -106,6 +502,7 @@ html, body {
 
 .chip {
   flex: none;
+  margin-left: auto;
   font-size: 11px;
   font-weight: 600;
   letter-spacing: .02em;
@@ -116,7 +513,7 @@ html, body {
 }
 
 .card-sub {
-  margin-top: 2px;
+  margin-top: 6px;
   color: var(--muted);
   font-size: 12.5px;
   font-family: ui-monospace, "SF Mono", Menlo, monospace;
@@ -125,21 +522,63 @@ html, body {
   white-space: nowrap;
 }
 
-.agents {
-  margin-top: 10px;
+/* Every agent/subagent is its own sub-card, nested inside the session card —
+   a small bordered box per running agent, indented under its parent when
+   it's a subagent, so the dispatch tree is visibly attached to the session
+   it belongs to rather than a loose list of text lines. */
+.card-agents {
+  margin-top: 12px;
   display: flex;
   flex-direction: column;
   gap: 6px;
 }
 
+.card-agent-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 7px 9px;
+}
+
+.card-agent-row .dot { flex: none; }
+
+.card-agent-text {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 12.5px;
+  color: var(--muted);
+  font-family: ui-monospace, "SF Mono", Menlo, monospace;
+}
+
+.card-agent-age {
+  flex: none;
+  color: var(--muted-2);
+  font-size: 11px;
+}
+
+.card-agent-more {
+  margin-left: 22px;
+  font-size: 11.5px;
+  color: var(--muted-2);
+}
+
+/* ------------------------------------------------------------ agent detail (inside modal) */
+
 .agent-row {
   display: flex;
   align-items: flex-start;
-  gap: 8px;
-  padding: 8px 10px;
+  gap: 12px;
+  padding: 12px 14px;
   border-radius: 9px;
   background: var(--card-nested);
   border: 1px solid transparent;
+  margin-bottom: 10px;
 }
 
 .agent-row[data-depth="1"] { margin-left: 20px; }
@@ -183,8 +622,10 @@ html, body {
   min-width: 0;
 }
 
-.agent-state .kw { color: var(--green); font-weight: 600; }
-.agent-state.done .kw { color: var(--muted-2); }
+.agent-state .kw { color: var(--muted); font-weight: 600; }
+.agent-state.done .kw { color: var(--green); }
+.agent-state.attn .kw { color: var(--amber); }
+.agent-state.working .kw { color: var(--working); }
 
 .agent-age {
   flex: none;
@@ -204,29 +645,44 @@ html, body {
   white-space: nowrap;
 }
 
-.agent-reply-toggle {
-  margin-top: 6px;
-  border: none;
-  background: none;
-  color: var(--accent);
-  font-size: 12px;
-  font-weight: 600;
-  padding: 2px 0;
-  cursor: pointer;
+/* Conversation context — full text, scrollable, so replying doesn't mean
+   guessing what's being answered. */
+.agent-context {
+  margin-top: 8px;
+  padding: 8px 10px;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  max-height: 180px;
+  overflow-y: auto;
+  font-size: 12.5px;
+  white-space: pre-wrap;
+  word-break: break-word;
 }
+.agent-context[hidden] { display: none; }
+.agent-context-you {
+  color: var(--muted);
+  margin-bottom: 6px;
+  padding-bottom: 6px;
+  border-bottom: 1px solid var(--border);
+}
+.agent-context-you[hidden] { display: none; }
+.agent-context-reply { color: var(--text); }
+.agent-context-reply[hidden] { display: none; }
 
 .reply-box {
-  margin-top: 6px;
+  margin-top: 10px;
   display: flex;
   gap: 6px;
 }
+.reply-box[hidden] { display: none; }
 
 .reply-box textarea {
   flex: 1;
   min-height: 36px;
   max-height: 120px;
   resize: vertical;
-  background: #17181b;
+  background: var(--bg);
   border: 1px solid var(--border);
   border-radius: 8px;
   color: var(--text);
@@ -248,10 +704,107 @@ html, body {
 
 .reply-box button:disabled { opacity: .5; }
 
+/* ------------------------------------------------------------ modal */
+
+.modal {
+  position: fixed;
+  /* Longhands, not `inset: 0` — legacy WebKit (checked against Clawdeck's own
+     compat notes) doesn't parse `inset` at all, which drops position to
+     auto/content-size instead of covering the screen. That reads as "the
+     modal doesn't open" even though it toggled from [hidden] correctly. */
+  top: 0;
+  right: 0;
+  bottom: 0;
+  left: 0;
+  z-index: 10;
+  display: flex;
+  align-items: flex-end;
+  justify-content: center;
+}
+
+.modal[hidden] { display: none; }
+
+.modal-backdrop {
+  position: absolute;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  left: 0;
+  background: rgba(0, 0, 0, 0.55);
+}
+
+.modal-sheet {
+  position: relative;
+  width: 100%;
+  max-width: 640px;
+  max-height: 82vh;
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-bottom: none;
+  border-radius: 16px 16px 0 0;
+  padding: 18px 20px;
+  padding-bottom: max(18px, env(safe-area-inset-bottom));
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.modal-head {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+}
+
+.modal-titles { min-width: 0; flex: 1; }
+
+.modal-title {
+  font-weight: 700;
+  font-size: 16px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.modal-sub {
+  margin-top: 2px;
+  color: var(--muted);
+  font-size: 12.5px;
+  font-family: ui-monospace, "SF Mono", Menlo, monospace;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.modal-close {
+  flex: none;
+  width: 30px;
+  height: 30px;
+  border-radius: 8px;
+  border: 1px solid var(--border);
+  background: var(--card-nested);
+  color: var(--text);
+  font-size: 16px;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.modal-body {
+  overflow-y: auto;
+  padding-right: 2px;
+}
+
+@media (min-width: 761px) {
+  .modal { align-items: center; }
+  .modal-sheet { border-radius: 16px; border-bottom: 1px solid var(--border); }
+}
+
+/* ------------------------------------------------------------ banner */
+
 .banner {
   position: fixed;
   left: 12px;
   right: 12px;
+  bottom: 12px;
   bottom: max(12px, env(safe-area-inset-bottom));
   background: #2a2416;
   border: 1px solid #4d3f1c;
@@ -261,4 +814,136 @@ html, body {
   font-size: 13px;
   max-width: 720px;
   margin: 0 auto;
+  z-index: 20;
 }
+
+/* ------------------------------------------------------------ legacy WebKit gap fallback */
+
+/* Safari shipped `gap` for grid at 12 (grid itself has understood the
+   pre-shorthand `grid-gap` since 10.1) and `gap` for flexbox only at 14.1 —
+   on anything older every `gap:` declaration above is silently a no-op, and
+   every "space between elements" in this file collapses to zero. Same
+   problem Clawdeck's ios10-compat.css documents and fixes the same way:
+   `not (gap: 1px)` reads as flexbox-gap support, so it also catches a
+   Safari 12–14 browser that has grid-gap but not flex-gap — which is
+   correct, since grid-gap already covers #cards there regardless.
+   Each block below zeroes the (inert-anyway) `gap` first so a browser with
+   partial/quirky support can't stack it with the margin fallback, then
+   gives every flex container's children a margin-based equivalent. */
+@supports not (gap: 1px) {
+  #cards { grid-gap: 20px; }
+
+  #app { gap: 0; }
+  #app > * + * { margin-left: 28px; }
+
+  #usage { gap: 0; }
+  #usage > * + * { margin-top: 14px; }
+
+  #usage-list { gap: 0; }
+  #usage-list > * + * { margin-top: 12px; }
+
+  #sessions { gap: 0; }
+  #sessions > * + * { margin-top: 18px; }
+
+  #sessions-head { gap: 0; }
+  #sessions-head > * + * { margin-left: 10px; }
+
+  .gauge-head { gap: 0; }
+  .gauge-head > * + * { margin-left: 8px; }
+
+  .card-head { gap: 0; }
+  .card-head > * + * { margin-left: 10px; }
+
+  .card-agents { gap: 0; }
+  .card-agents > * + * { margin-top: 6px; }
+
+  .card-agent-row { gap: 0; }
+  .card-agent-row > * + * { margin-left: 8px; }
+
+  .agent-row { gap: 0; }
+  .agent-row > * + * { margin-left: 12px; }
+
+  .agent-line { gap: 0; }
+  .agent-line > * + * { margin-left: 6px; }
+
+  .reply-box { gap: 0; }
+  .reply-box > * + * { margin-left: 6px; }
+
+  .modal-sheet { gap: 0; }
+  .modal-sheet > * + * { margin-top: 14px; }
+
+  .modal-head { gap: 0; }
+  .modal-head > * + * { margin-left: 8px; }
+
+  @media (max-width: 760px) {
+    /* #app switches to a column here, and #usage-list to a wrapping row —
+       both need the OTHER axis's margin instead of the base rules above. */
+    #app > * + * { margin-left: 0; margin-top: 20px; }
+    #usage-list { flex-wrap: wrap; }
+    #usage-list > * + * { margin-top: 0; margin-left: 0; }
+    #usage-list .gauge { margin: 6px; }
+  }
+}
+
+/* ------------------------------------------------------------ ?mock=puppy */
+
+.mock-wrap {
+  max-width: 720px;
+  margin: 0 auto;
+  padding: 32px 24px 64px;
+}
+
+.mock-wrap h1 { font-size: 22px; margin: 0 0 16px; }
+.mock-wrap h2 {
+  font-size: 16px;
+  margin: 0 0 8px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.mock-wrap h2 svg.state-icon { width: 18px; height: 18px; }
+.mock-wrap p { margin: 0 0 8px; line-height: 1.5; color: var(--text); }
+.mock-wrap code {
+  font-family: ui-monospace, "SF Mono", Menlo, monospace;
+  background: var(--card-nested);
+  padding: 1px 5px;
+  border-radius: 4px;
+  font-size: 0.92em;
+}
+
+.mock-intro { color: var(--muted); margin-bottom: 32px; }
+
+.mock-mood {
+  display: flex;
+  gap: 20px;
+  align-items: flex-start;
+  padding: 20px 0;
+  border-top: 1px solid var(--border);
+}
+
+.mock-mood-preview {
+  flex: none;
+  width: 100px;
+  height: 100px;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.mock-mood-preview .orca-mascot { width: 60px; height: 56px; }
+
+.mock-mood-info { flex: 1; min-width: 0; }
+.mock-mood-info p { font-size: 13.5px; color: var(--muted); }
+.mock-mood-info p strong { color: var(--text); }
+
+.mock-oneshot #mock-bounce-btn { margin-top: 8px; }
+
+.mock-ladder {
+  padding: 24px 0 0;
+  border-top: 1px solid var(--border);
+  margin-top: 8px;
+}
+.mock-ladder ol { padding-left: 22px; margin: 12px 0 0; }
+.mock-ladder li { margin-bottom: 8px; font-size: 13.5px; color: var(--muted); }
+.mock-ladder li strong { color: var(--text); }

@@ -7,17 +7,188 @@
   <link rel="stylesheet" href="/styles.css" />
 </head>
 <body>
-  <header id="topbar">
-    <div id="topbar-title">
-      <span class="orca-mark">🐋</span>
-      <span>orcaDeck</span>
+  <header id="hero">
+    <div class="hero-inner">
+    <div id="mascot-wrap" class="mascot-wrap">
+      <!-- Minimal orca, front-on chibi mascot — same construction the crab
+           uses (sidecrab.js): one body blob, two big eyes, two little side
+           fins standing in for arms, a few tail tabs standing in for legs,
+           a small dorsal-fin bump so the silhouette still reads as "orca".
+           Blocky/crispEdges, solid white; colour lives in the state icon
+           beside it (#hero-state) and in the decorations below, not on the
+           mascot — only its MOTION changes with data-mood. -->
+      <svg id="orca" class="orca-mascot orca-front" data-mood="idle" shape-rendering="crispEdges" viewBox="0 0 32 30" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="orcaDeck status">
+        <g class="rig">
+          <g class="fins">
+            <rect x="2" y="14" width="4" height="6" />
+            <rect x="26" y="14" width="4" height="6" />
+          </g>
+          <g class="px">
+            <rect x="6" y="8" width="20" height="16" />
+            <rect x="12" y="4" width="8" height="5" />
+            <rect x="14" y="1" width="4" height="4" />
+          </g>
+          <g class="tail">
+            <rect x="8" y="24" width="4" height="4" />
+            <rect x="14" y="24" width="4" height="4" />
+            <rect x="20" y="24" width="4" height="4" />
+          </g>
+          <g class="eyes eyes-open">
+            <rect x="10" y="13" width="4" height="4" />
+            <rect x="18" y="13" width="4" height="4" />
+          </g>
+          <g class="eyes eyes-sleep">
+            <rect x="10" y="14.5" width="4" height="1.5" />
+            <rect x="18" y="14.5" width="4" height="1.5" />
+          </g>
+          <g class="eyes eyes-worried">
+            <rect x="10.5" y="12" width="3" height="6" />
+            <rect x="18.5" y="12" width="3" height="6" />
+          </g>
+          <g class="zzz">
+            <rect x="22" y="2" width="3" height="2" />
+            <rect x="26" y="0" width="2" height="2" />
+            <rect x="23" y="-2" width="3" height="2" />
+          </g>
+        </g>
+      </svg>
+
+      <!-- Needs-attention decoration: the same question-bubble icon
+           used everywhere else, floating beside the mascot so the mood is
+           unmissable at a glance, not just a subtle shiver + eye shape. -->
+      <div id="orca-chat" class="orca-decoration orca-chat"></div>
+
+      <!-- Working→Done splash: a handful of blue droplets that pop out and
+           fade during the one-shot bounce, on top of the two hops. -->
+      <div id="orca-splash" class="orca-decoration orca-splash" aria-hidden="true">
+        <span class="drop"></span>
+        <span class="drop"></span>
+        <span class="drop"></span>
+        <span class="drop"></span>
+      </div>
     </div>
-    <div id="topbar-status" class="muted">connecting…</div>
+    <div id="clock">
+      <div class="clock-row"><span id="clock-hm">--:--</span><span id="clock-ss">--</span></div>
+      <div id="clock-date">—</div>
+      <div id="hero-state"></div>
+      <div id="hero-status" class="muted">connecting…</div>
+    </div>
+    </div>
   </header>
 
-  <main id="app">
-    <div id="empty" class="empty-state" hidden>No worktrees discovered.</div>
+  <!-- Dev-only mascot showcase, mirroring Clawdeck's own ?mock= convention.
+       Visit /?mock=puppy — panel.js swaps this in for the live dashboard,
+       renders one live clone of the real #orca per mood, and never touches
+       /v1/state. Static content in the file rather than built in JS: it's
+       documentation first, demo second. -->
+  <main id="mock-puppy" hidden>
+    <div class="mock-wrap">
+      <h1>How the mascot works</h1>
+      <p class="mock-intro">
+        The mascot (nicknamed "the puppy" while building it) has exactly four moods, each tied to the
+        <strong>aggregate</strong> state across every session on the board — never a single card. Every part is
+        always in the DOM; only a <code>data-mood</code> attribute changes, the same mood-machine idea
+        Clawdeck's crab uses. Color lives in the state icon beside the clock and on the cards, not on the
+        mascot itself — the mascot is always solid white; only its <em>motion</em> changes.
+      </p>
+
+      <section class="mock-mood">
+        <div class="mock-mood-preview" data-mood="idle"></div>
+        <div class="mock-mood-info">
+          <h2><span class="dot-plain" style="width:8px;height:8px;border-radius:50%;background:var(--gray-dot);"></span>Idle (asleep)</h2>
+          <p><strong>Trigger:</strong> either the panel has never successfully loaded any data yet (first load), or it has loaded data and there are zero agents running anywhere at all.</p>
+          <p><strong>Looks like:</strong> eyes closed, small "zzz" marks floating above.</p>
+          <p><strong>Duration:</strong> continuous — holds until a session starts working, needs attention, or the first Done session appears.</p>
+        </div>
+      </section>
+
+      <section class="mock-mood">
+        <div class="mock-mood-preview" data-mood="working"></div>
+        <div class="mock-mood-info">
+          <h2><span class="state-icon spin-ring"></span>Working</h2>
+          <p><strong>Trigger:</strong> at least one session's agent is actively working, and nothing anywhere needs attention (working never outranks attention).</p>
+          <p><strong>Looks like:</strong> eyes open, a continuous gentle bob, the side fins flap and the tail tabs wiggle.</p>
+          <p><strong>Duration:</strong> continuous — lasts exactly as long as at least one session is working.</p>
+        </div>
+      </section>
+
+      <section class="mock-mood">
+        <div class="mock-mood-preview" data-mood="attn"></div>
+        <div class="mock-mood-info">
+          <h2><span class="icon-chat"></span>Needs attention</h2>
+          <p><strong>Trigger (highest priority — outranks everything else):</strong> at least one session's agent genuinely needs a human — a needs-input/waiting/blocked state, <code>state:"working"</code> with <code>workingMode:"monitoring"</code> (it finished its turn and is idling, most often waiting on a reply), or <code>interrupted:true</code>. Also triggers if orcad itself becomes unreachable or errors <em>after</em> data had already loaded once — that's something to go check too.</p>
+          <p><strong>Looks like:</strong> eyes narrow and worried, a continuous small side-to-side shiver.</p>
+          <p><strong>Duration:</strong> continuous — holds until every such session is resolved (answered, or orcad reconnects).</p>
+        </div>
+      </section>
+
+      <section class="mock-mood">
+        <div class="mock-mood-preview" data-mood="done"></div>
+        <div class="mock-mood-info">
+          <h2><span class="icon-check"></span>Done</h2>
+          <p><strong>Trigger:</strong> nothing is working and nothing needs attention, but at least one agent has run somewhere (so it isn't truly empty) — the default "nothing left to do" pose.</p>
+          <p><strong>Looks like:</strong> eyes open, calm — no special animation.</p>
+          <p><strong>Duration:</strong> continuous — holds until something starts working, needs attention, or every session disappears entirely (then it's Idle instead).</p>
+        </div>
+      </section>
+
+      <section class="mock-mood mock-oneshot">
+        <div class="mock-mood-preview" data-mood="done" data-bounce-target></div>
+        <div class="mock-mood-info">
+          <h2>Bounce (one-shot, on top of Done)</h2>
+          <p><strong>Trigger:</strong> the exact instant the mood transitions from Working straight to Done — i.e. the last actively-working session anywhere just finished with nothing left waiting.</p>
+          <p><strong>Looks like:</strong> two quick whole-body hops.</p>
+          <p><strong>Duration:</strong> ~800ms one-shot, then it settles back into the ordinary Done pose. It cannot repeat mid-flight — it only ever fires again on the next working→done transition.</p>
+          <button type="button" id="mock-bounce-btn" class="chip-btn">Play it</button>
+        </div>
+      </section>
+
+      <section class="mock-ladder">
+        <h2>The priority ladder</h2>
+        <p>Checked top to bottom, every poll — the first match wins, exactly like Clawdeck's own crab mood ladder:</p>
+        <ol>
+          <li>Never successfully loaded any data yet → <strong>Idle</strong></li>
+          <li>orcad unreachable / a render error, <em>after</em> data had already loaded once → <strong>Needs attention</strong></li>
+          <li>Any session needs attention right now → <strong>Needs attention</strong></li>
+          <li>Any session is actively working → <strong>Working</strong></li>
+          <li>Zero agents running anywhere at all → <strong>Idle</strong></li>
+          <li>Otherwise (only finished sessions) → <strong>Done</strong></li>
+        </ol>
+      </section>
+    </div>
   </main>
+
+  <main id="app">
+    <aside id="usage">
+      <div class="panel-label">Usage</div>
+      <div id="usage-list"></div>
+      <div id="usage-empty" class="empty-state small" hidden>No connected accounts report usage.</div>
+    </aside>
+
+    <section id="sessions">
+      <div id="sessions-head">
+        <div class="panel-label">Sessions</div>
+        <span id="session-count" class="session-count"></span>
+        <button type="button" id="filter-chip" class="chip-btn" data-filter="all">All</button>
+      </div>
+      <div id="cards"></div>
+      <div id="empty" class="empty-state" hidden>No worktrees discovered.</div>
+    </section>
+  </main>
+
+  <div id="modal" class="modal" hidden>
+    <div id="modal-backdrop" class="modal-backdrop"></div>
+    <div class="modal-sheet" role="dialog" aria-modal="true" aria-label="Session detail">
+      <div class="modal-head">
+        <div class="modal-titles">
+          <div id="modal-title" class="modal-title"></div>
+          <div id="modal-sub" class="modal-sub"></div>
+        </div>
+        <button type="button" id="modal-close" class="modal-close" aria-label="Close">&#215;</button>
+      </div>
+      <div id="modal-body" class="modal-body"></div>
+    </div>
+  </div>
 
   <div id="token-banner" class="banner" hidden>
     Not paired with orcad. Open the LAN link printed in the orcad console (it carries a token),

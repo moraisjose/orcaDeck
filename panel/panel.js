@@ -1,17 +1,63 @@
-// orcaDeck panel — polls orcad's /v1/state and renders the worktree/agent
-// tree the way Orca's own sidebar does: a card per worktree, a row per
-// agent, subagents nested under their parent. Vanilla JS, no build step —
-// same spirit as SideCrab's widget.
+// orcaDeck panel — polls orcad's /v1/state and renders a usage column plus a
+// scrollable, sorted/filterable list of session cards, the way Clawdeck lays
+// its own panel out (usage left, sessions right). Vanilla JS, no build step.
+//
+// Rendering is a keyed diff, not a teardown/rebuild: every poll updates
+// existing DOM nodes in place (by worktreeId) and only creates/removes nodes
+// when the session set actually changes. A full rebuild every 2s was why
+// harness logos used to flash on every poll — an <img> torn down and
+// recreated re-decodes from scratch even when the bytes are cached.
 
 const POLL_MS = 2000;
 const TOKEN_KEY = "orcad_token";
 
+// Real brand marks only. claude.svg/opencode.svg are the exact paths Clawdeck
+// verified it lifted from Orca's own UI ("the REAL ones... so the panel and
+// the window the operator already has open name the same thing the same
+// way" — sidecrab.js CLIENT_GLYPHS) — the .webp files orcaDeck shipped here
+// before this were mismatched mascot art bundled elsewhere in Orca's app,
+// not its Claude/OpenCode logos. gremlin/gwindows were dropped outright: they
+// aren't real agentType values Orca ever emits (checked against Orca's own
+// agent catalog), just more of that unrelated mascot art.
+// onerror below still catches an agentType with no shipped mark at all (e.g.
+// codex, gemini, pi) and swaps to the text badge instead of a broken image.
 const LOGO_BY_TYPE = {
-  claude: "/assets/harness/claude.webp",
-  "claude-agent-teams": "/assets/harness/claude.webp",
+  claude: "/assets/harness/claude.svg",
+  "claude-agent-teams": "/assets/harness/claude.svg",
   openclaude: "/assets/harness/openclaude.png",
-  opencode: "/assets/harness/opencode.webp",
+  opencode: "/assets/harness/opencode.svg",
+  ghostty: "/assets/harness/ghostty.svg",
+  minimax: "/assets/harness/minimax.svg",
 };
+
+const ATTENTION_STATES = new Set(["needs_input", "attention", "waiting", "blocked"]);
+
+// The single source of truth for "does this agent need a human" — every
+// place that used to check ATTENTION_STATES.has(agent.state) alone now goes
+// through this, so the rule can never drift between the rollup, the dot, and
+// the modal's per-agent label.
+//
+// A raw `state: "working"` is NOT sufficient evidence of active work: Orca's
+// own UI (verified against its bundled terminal-tab-activity-status.js)
+// treats `workingMode: "monitoring"` as its own case — the agent finished
+// its turn and is idling, most often because it just asked a question and
+// is waiting on a reply. `interrupted` is folded in for the same reason: an
+// interrupted run is something a human should look at, not something
+// quietly counted as "working".
+function isAttention(agent) {
+  if (ATTENTION_STATES.has(agent.state)) return true;
+  if (agent.state === "working" && agent.workingMode === "monitoring") return true;
+  if (agent.interrupted === true) return true;
+  return false;
+}
+
+const FILTER_MODES = ["all", "working", "attention", "done"];
+const FILTER_LABELS = { all: "All", working: "Working", attention: "Needs attention", done: "Done" };
+
+let filterMode = "all";
+const cardNodes = new Map(); // worktreeId -> card element
+let lastGoodDoc = null;
+let openModalId = null;
 
 function getToken() {
   const url = new URL(window.location.href);
@@ -45,35 +91,335 @@ function el(tag, className, children) {
   return node;
 }
 
-function harnessLogo(agentType) {
-  const src = LOGO_BY_TYPE[agentType];
-  if (src) {
-    const img = el("img", "agent-logo");
-    img.src = src;
-    img.alt = agentType;
-    return img;
-  }
-  const badge = el("div", "agent-logo fallback");
-  badge.textContent = (agentType || "?").slice(0, 2).toUpperCase();
-  return badge;
+function setText(node, text) {
+  if (node.textContent !== text) node.textContent = text;
 }
 
-function agentStateLine(agent) {
-  const line = el("div", "agent-state" + (agent.state === "done" ? " done" : ""));
-  const kw = el("span", "kw");
-  kw.textContent = agent.state === "working" ? "Working" : agent.state === "done" ? "Done" : (agent.state || "—");
-  line.append(kw);
-  if (agent.toolName) {
-    line.append(document.createTextNode(" — " + agent.toolName));
-    if (agent.toolInput) {
-      const trimmed = String(agent.toolInput).slice(0, 80);
-      line.append(document.createTextNode(": " + trimmed));
-    }
-  } else if (agent.lastAssistantMessage) {
-    line.append(document.createTextNode(" — " + String(agent.lastAssistantMessage).slice(0, 80)));
-  }
-  return line;
+function harnessLogo(agentType) {
+  const src = LOGO_BY_TYPE[agentType];
+  const badge = el("div", "agent-logo fallback");
+  badge.textContent = (agentType || "?").slice(0, 2).toUpperCase();
+  if (!src) return badge;
+  const img = el("img", "agent-logo");
+  img.src = src;
+  img.alt = agentType;
+  // A harness type with no shipped mark (codex, say) 404s — swap to the
+  // text badge instead of leaving the browser's broken-image icon on screen.
+  img.onerror = () => img.replaceWith(badge);
+  return img;
 }
+
+// -------------------------------------------------------------- rollup / sort / filter
+
+function collectAgents(agents, out) {
+  for (const a of agents || []) {
+    out.push(a);
+    collectAgents(a.children, out);
+  }
+}
+
+function rollup(w) {
+  const agents = [];
+  collectAgents(w.agents, agents);
+
+  // Deliberately NOT seeded from w.status: orca's worktree-level "active" just
+  // means "has a live/attached terminal" (the same green dot Orca's own UI
+  // shows for a long-finished session), not "an agent is working right now".
+  // Only a specific agent's state counts as evidence of work in progress.
+  let attn = false;
+  let working = false;
+  let workingCount = 0;
+  let attnCount = 0;
+
+  for (const a of agents) {
+    if (isAttention(a)) {
+      attn = true;
+      attnCount++;
+    } else if (a.state === "working") {
+      working = true;
+      workingCount++;
+    }
+  }
+
+  // Four distinct bands now, not three — idle used to share band 2 with
+  // Done (only the label differed); it's its own lowest-priority band so the
+  // sort order is exactly needs attention, working, done, idle.
+  let band;
+  let label;
+  if (attn) {
+    band = 0;
+    label = attnCount > 1 ? `${attnCount} need attention` : "Needs attention";
+  } else if (working) {
+    band = 1;
+    label = workingCount > 1 ? `${workingCount} working` : "Working";
+  } else if (agents.length) {
+    band = 2;
+    label = "Done";
+  } else {
+    band = 3;
+    label = "Idle";
+  }
+
+  return { band, label, agentCount: agents.length };
+}
+
+function matchesFilter(band, mode) {
+  if (mode === "all") return true;
+  if (mode === "working") return band === 1;
+  if (mode === "attention") return band === 0;
+  if (mode === "done") return band === 2;
+  return true;
+}
+
+// lastOutputAt, not lastActivityAt — checked against live data where the two
+// diverged by 14+ hours on the same worktree (lastActivityAt tracks
+// something else, stale after just replying into that session).
+// lastOutputAt is the one that actually moves the moment a terminal produces
+// new output, which is what "most recent" should mean here.
+function recencyOf(w) {
+  return w.lastOutputAt || w.lastActivityAt || 0;
+}
+
+function sortedWorktrees(worktrees) {
+  return worktrees
+    .map((w, i) => ({ w, i, r: rollup(w) }))
+    .sort((a, b) => (a.r.band - b.r.band) || (recencyOf(b.w) - recencyOf(a.w)) || (a.i - b.i));
+}
+
+// ---------------------------------------------------------------- state icons
+
+// The exact three icons Orca's own AgentStateDot component uses (read out of
+// its bundled source): a CSS spinner ring for working, Lucide's
+// message-circle-question-mark for needs attention, circle-check for done.
+// Reproduced as real elements/paths, not re-drawn, so they read as the same
+// status language a viewer already knows from Orca itself.
+const SVG_NS = "http://www.w3.org/2000/svg";
+
+function svgIcon(className, defs) {
+  const svg = document.createElementNS(SVG_NS, "svg");
+  svg.setAttribute("viewBox", "0 0 24 24");
+  svg.setAttribute("class", "state-icon " + className);
+  for (const [tag, attrs] of defs) {
+    const node = document.createElementNS(SVG_NS, tag);
+    for (const k in attrs) node.setAttribute(k, attrs[k]);
+    svg.appendChild(node);
+  }
+  return svg;
+}
+
+function chatIcon() {
+  return svgIcon("icon-chat", [
+    ["path", { d: "M2.992 16.342a2 2 0 0 1 .094 1.167l-1.065 3.29a1 1 0 0 0 1.236 1.168l3.413-.998a2 2 0 0 1 1.099.092 10 10 0 1 0-4.777-4.719" }],
+    ["path", { d: "M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3" }],
+    ["path", { d: "M12 17h.01" }],
+  ]);
+}
+
+function checkIcon() {
+  return svgIcon("icon-check", [
+    ["circle", { cx: "12", cy: "12", r: "10" }],
+    ["path", { d: "m9 12 2 2 4-4" }],
+  ]);
+}
+
+// kind: "working" | "attn" | "done" | anything else (idle/unknown -> a plain
+// neutral dot, matching Orca's own dot for idle/unverifiable states).
+function stateIconNode(kind) {
+  if (kind === "working") return el("span", "state-icon spin-ring");
+  if (kind === "attn") return chatIcon();
+  if (kind === "done") return checkIcon();
+  return el("span", "state-icon dot-plain");
+}
+
+// ------------------------------------------------------------------- cards
+
+function stateClass(r) {
+  if (r.band === 0) return "attn";
+  if (r.band === 1) return "working";
+  if (r.band === 2) return "done";
+  return "idle";
+}
+
+function buildCard(w) {
+  const card = el("div", "card");
+  card.tabIndex = 0;
+  card.setAttribute("role", "button");
+
+  // The state is the first thing on the card, bold and in its own colour —
+  // the thing a glance across the grid should read first, before the name.
+  const state = el("div", "card-state");
+  const stateIconSlot = el("span", "card-state-icon");
+  const stateText = el("span", "card-state-text");
+  state.append(stateIconSlot, stateText);
+
+  const head = el("div", "card-head");
+  const logoSlot = el("span", "card-logo");
+  const title = el("div", "card-title");
+  const chip = el("span", "chip");
+  chip.textContent = "primary";
+  head.append(logoSlot, title, chip);
+
+  const sub = el("div", "card-sub");
+  const agentsBox = el("div", "card-agents");
+
+  card.append(state, head, sub, agentsBox);
+  card.addEventListener("click", () => openModal(card.dataset.wtid));
+  card.addEventListener("keydown", (ev) => {
+    if (ev.key === "Enter" || ev.key === " ") {
+      ev.preventDefault();
+      openModal(card.dataset.wtid);
+    }
+  });
+
+  return card;
+}
+
+function agentStateKind(agent) {
+  if (isAttention(agent)) return "attn";
+  if (agent.state === "working") return "working";
+  if (agent.state === "done") return "done";
+  return "idle";
+}
+
+// The line a subagent row shows: whatever's most specific about what it's
+// doing right now, in the same priority order the modal's full detail uses.
+function agentRowText(agent) {
+  if (agent.toolName) {
+    const input = agent.toolInput ? String(agent.toolInput).slice(0, 60) : "";
+    return input ? `${agent.toolName}: ${input}` : agent.toolName;
+  }
+  if (agent.lastAssistantMessage) return String(agent.lastAssistantMessage).slice(0, 60);
+  return agent.taskTitle || agent.displayName || agent.prompt || agent.agentType || "—";
+}
+
+const CARD_AGENT_ROW_LIMIT = 4;
+
+// Flattens the agent/subagent tree into (agent, depth) pairs, depth-first —
+// the same order Orca's own sidebar lists a dispatch under its parent —
+// capped so one worktree running a large dispatch can't blow up a grid card.
+function flattenAgentsForCard(agents, depth, out) {
+  for (const a of agents || []) {
+    if (out.length >= CARD_AGENT_ROW_LIMIT) return;
+    out.push({ agent: a, depth });
+    flattenAgentsForCard(a.children, depth + 1, out);
+  }
+}
+
+function countAgents(agents) {
+  let n = 0;
+  for (const a of agents || []) n += 1 + countAgents(a.children);
+  return n;
+}
+
+function buildCardAgentRow(agent, depth) {
+  const row = el("div", "card-agent-row");
+  row.style.marginLeft = depth * 14 + "px";
+  const dot = stateIconNode(agentStateKind(agent));
+  const text = el("span", "card-agent-text");
+  text.textContent = agentRowText(agent);
+  const age = el("span", "card-agent-age");
+  age.textContent = fmtAge(agent.updatedAt || agent.stateStartedAt);
+  row.append(dot, text, age);
+  return row;
+}
+
+function updateCard(card, w, r) {
+  card.dataset.wtid = w.worktreeId;
+  card.className = "card" + (r.band === 0 ? " attn" : r.band === 1 ? " working" : "");
+
+  const stateEl = card.querySelector(".card-state");
+  const kind = stateClass(r);
+  stateEl.className = "card-state " + kind;
+  setText(stateEl.querySelector(".card-state-text"), r.label);
+  const iconSlot = stateEl.querySelector(".card-state-icon");
+  if (iconSlot.dataset.kind !== kind) {
+    iconSlot.textContent = "";
+    iconSlot.append(stateIconNode(kind));
+    iconSlot.dataset.kind = kind;
+  }
+
+  setText(card.querySelector(".card-title"), w.displayName || w.repo || w.branch || "worktree");
+  card.querySelector(".chip").hidden = !w.isMainWorktree;
+
+  const logoSlot = card.querySelector(".card-logo");
+  const topType = w.agents && w.agents[0] ? w.agents[0].agentType : null;
+  if (topType) {
+    logoSlot.hidden = false;
+    // Only recreate the <img> when the harness actually changes — this is
+    // the same node-reuse discipline as the rest of the diff, so a card
+    // whose agent type is unchanged never re-triggers an image load.
+    if (logoSlot.dataset.type !== topType) {
+      // Element.replaceChildren is Safari 16+ / iPadOS 16+ only — an older
+      // iPad throws here, and since this runs inside poll()'s try/catch it
+      // got mislabeled "unreachable" even though the fetch had succeeded.
+      logoSlot.textContent = "";
+      logoSlot.append(harnessLogo(topType));
+      logoSlot.dataset.type = topType;
+    }
+  } else {
+    logoSlot.hidden = true;
+  }
+
+  setText(card.querySelector(".card-sub"), [w.repo, w.branch].filter(Boolean).join(" · "));
+
+  // Every agent/subagent gets its own bordered sub-card, nested under the
+  // session card — the state line above already says Working/Done/Idle for
+  // the whole session, so this is purely "what's actually running".
+  const agentsBox = card.querySelector(".card-agents");
+  agentsBox.textContent = "";
+  const flat = [];
+  flattenAgentsForCard(w.agents, 0, flat);
+  const total = countAgents(w.agents);
+  for (const { agent, depth } of flat) agentsBox.append(buildCardAgentRow(agent, depth));
+  if (total > flat.length) {
+    const more = el("div", "card-agent-more");
+    more.textContent = `+${total - flat.length} more`;
+    agentsBox.append(more);
+  }
+}
+
+function renderCards(worktrees) {
+  const container = document.getElementById("cards");
+  const ranked = sortedWorktrees(worktrees).filter((x) => matchesFilter(x.r.band, filterMode));
+
+  const seen = new Set();
+  let prevNode = null;
+  for (const { w, r } of ranked) {
+    seen.add(w.worktreeId);
+    let card = cardNodes.get(w.worktreeId);
+    if (!card) {
+      card = buildCard(w);
+      cardNodes.set(w.worktreeId, card);
+    }
+    updateCard(card, w, r);
+    // Keyed reorder — but ONLY when actually out of place. Node.after()/
+    // .prepend() always remove-then-reinsert per the DOM spec, even when the
+    // node is already exactly where it belongs; reinserting a node blurs it
+    // if it (or a descendant) had focus. Skipping the call when the position
+    // is already correct is what makes this truly a no-op on an unchanged
+    // order, not just "no visible move".
+    if (prevNode) {
+      if (prevNode.nextElementSibling !== card) prevNode.after(card);
+    } else if (container.firstElementChild !== card) {
+      container.prepend(card);
+    }
+    prevNode = card;
+  }
+
+  for (const [id, node] of cardNodes) {
+    if (!seen.has(id)) {
+      node.remove();
+      cardNodes.delete(id);
+    }
+  }
+
+  document.getElementById("empty").hidden = worktrees.length > 0;
+  const count = worktrees.length;
+  const shown = ranked.length;
+  setText(document.getElementById("session-count"), shown === count ? String(count) : `${shown}/${count}`);
+}
+
+// ------------------------------------------------------------------- modal
 
 async function sendAction(body) {
   const res = await fetch("/v1/action", {
@@ -88,108 +434,332 @@ async function sendAction(body) {
   return res.json();
 }
 
-function buildReplyBox(agent) {
-  const box = el("div", "reply-box");
-  box.hidden = true;
+// Keyed by paneKey, exactly like cardNodes for the grid — a poll while the
+// modal is open used to wipe modal-body and rebuild every row (and every
+// <textarea>) from scratch. On an iPad that destroys the very element the
+// tap just focused a moment earlier, so the on-screen keyboard that was
+// opening immediately closed again (and any text already typed vanished
+// with it). Reused nodes fix both.
+const modalRowNodes = new Map();
+
+function agentRowExtraText(agent) {
+  if (agent.toolName) {
+    const input = agent.toolInput ? String(agent.toolInput).slice(0, 80) : "";
+    return input ? ` — ${agent.toolName}: ${input}` : ` — ${agent.toolName}`;
+  }
+  if (agent.lastAssistantMessage) return " — " + String(agent.lastAssistantMessage).slice(0, 80);
+  return "";
+}
+
+function buildAgentRow() {
+  const row = el("div", "agent-row");
+  const logoSlot = el("span", "agent-logo-slot");
+  const main = el("div", "agent-main");
+  const line = el("div", "agent-line");
+  const stateLine = el("div", "agent-state");
+  const kw = el("span", "kw");
+  const extra = el("span", "agent-extra");
+  stateLine.append(kw, extra);
+  const age = el("span", "agent-age");
+  line.append(stateLine, age);
+  const detail = el("div", "agent-detail");
+
+  // Conversation context, so replying doesn't mean guessing what's being
+  // answered — the last thing the user said and the agent's own last
+  // message (which, on a needs-attention session, is usually the question
+  // itself), shown in full rather than the one-line truncated preview above.
+  const context = el("div", "agent-context");
+  const contextYou = el("div", "agent-context-you");
+  const contextReply = el("div", "agent-context-reply");
+  context.append(contextYou, contextReply);
+
+  const replyBox = el("div", "reply-box");
   const textarea = document.createElement("textarea");
   textarea.placeholder = "Send to this session…";
   const button = document.createElement("button");
   button.textContent = "Send";
-  button.disabled = !agent.terminalHandle;
   button.onclick = async () => {
     const text = textarea.value.trim();
-    if (!text) return;
+    const agent = row._agent;
+    if (!text || !agent || !agent.terminalHandle) return;
     button.disabled = true;
     try {
       await sendAction({ type: "send-text", terminalHandle: agent.terminalHandle, text, enter: true });
       textarea.value = "";
-      box.hidden = true;
     } catch (err) {
       console.error(err);
     } finally {
       button.disabled = false;
     }
   };
-  box.append(textarea, button);
-  return box;
+  replyBox.append(textarea, button);
+  main.append(line, detail, context, replyBox);
+  row.append(logoSlot, main);
+
+  row._logoSlot = logoSlot;
+  row._stateLine = stateLine;
+  row._kw = kw;
+  row._extra = extra;
+  row._age = age;
+  row._detail = detail;
+  row._context = context;
+  row._contextYou = contextYou;
+  row._contextReply = contextReply;
+  row._replyBox = replyBox;
+  row._button = button;
+  return row;
 }
 
-function renderAgent(agent, depth) {
-  const row = el("div", "agent-row");
+function updateAgentRow(row, agent, depth) {
+  row._agent = agent; // the Send button's onclick reads this, never a stale closure
   row.dataset.depth = String(Math.min(depth, 3));
 
-  const main = el("div", "agent-main");
-  const line = el("div", "agent-line", [agentStateLine(agent)]);
-  const age = el("span", "agent-age");
-  age.textContent = fmtAge(agent.updatedAt || agent.stateStartedAt);
-  line.append(age);
-  main.append(line);
+  const attn = isAttention(agent);
+  row._stateLine.className = "agent-state" + (attn ? " attn" : agent.state === "done" ? " done" : agent.state === "working" ? " working" : "");
+  setText(row._kw, attn ? "Needs input" : agent.state === "working" ? "Working" : agent.state === "done" ? "Done" : (agent.state || "—"));
+  setText(row._extra, agentRowExtraText(agent));
+  setText(row._age, fmtAge(agent.updatedAt || agent.stateStartedAt));
 
   const label = agent.displayName || agent.taskTitle || agent.agentType;
-  if (label) {
-    const detail = el("div", "agent-detail");
-    detail.textContent = label;
-    main.append(detail);
+  row._detail.hidden = !label;
+  if (label) setText(row._detail, label);
+
+  const logoSlot = row._logoSlot;
+  if (logoSlot.dataset.type !== (agent.agentType || "")) {
+    logoSlot.textContent = "";
+    logoSlot.append(harnessLogo(agent.agentType));
+    logoSlot.dataset.type = agent.agentType || "";
   }
 
-  if (agent.terminalHandle) {
-    const toggle = el("button", "agent-reply-toggle");
-    toggle.textContent = "Reply";
-    const replyBox = buildReplyBox(agent);
-    toggle.onclick = () => {
-      replyBox.hidden = !replyBox.hidden;
-    };
-    main.append(toggle, replyBox);
-  }
+  // Full text here, not the 80-char preview above — this is specifically
+  // for reading before replying, so truncating it would defeat the point.
+  const hasYou = Boolean(agent.prompt);
+  const hasReply = Boolean(agent.lastAssistantMessage);
+  row._contextYou.hidden = !hasYou;
+  if (hasYou) setText(row._contextYou, "You: " + agent.prompt);
+  row._contextReply.hidden = !hasReply;
+  if (hasReply) setText(row._contextReply, agent.lastAssistantMessage);
+  row._context.hidden = !hasYou && !hasReply;
 
-  row.append(harnessLogo(agent.agentType), main);
-
-  const rows = [row];
-  for (const child of agent.children || []) {
-    rows.push(...renderAgent(child, depth + 1));
-  }
-  return rows;
+  row._replyBox.hidden = !agent.terminalHandle;
+  row._button.disabled = !agent.terminalHandle;
 }
 
-function statusDotClass(status) {
-  if (status === "working" || status === "active") return "dot on";
-  if (status === "needs_input" || status === "attention") return "dot attn";
-  return "dot";
+// Flattens the tree into (paneKey, agent, depth) triples, depth-first —
+// same order the cards use, no row-count cap here (this is the detail view).
+function flattenAgentsForModal(agents, depth, out) {
+  for (const a of agents || []) {
+    out.push({ key: a.paneKey, agent: a, depth });
+    flattenAgentsForModal(a.children, depth + 1, out);
+  }
 }
 
-function renderWorktree(w) {
-  const card = el("div", "card");
+function openModal(worktreeId) {
+  const doc = lastGoodDoc;
+  const w = doc && (doc.worktrees || []).find((x) => x.worktreeId === worktreeId);
+  if (!w) return;
+  openModalId = worktreeId;
+  renderModal(w);
+  document.getElementById("modal").hidden = false;
+}
 
-  const head = el("div", "card-head", [el("span", statusDotClass(w.status))]);
-  const title = el("div", "card-title");
-  title.textContent = w.displayName || w.repo || w.branch || "worktree";
-  head.append(title);
-  if (w.isMainWorktree) {
-    const chip = el("span", "chip");
-    chip.textContent = "primary";
-    head.append(chip);
-  }
-  card.append(head);
+function closeModal() {
+  openModalId = null;
+  document.getElementById("modal").hidden = true;
+}
 
-  const sub = el("div", "card-sub");
-  sub.textContent = [w.repo, w.branch].filter(Boolean).join(" · ");
-  card.append(sub);
+function renderModal(w) {
+  setText(document.getElementById("modal-title"), w.displayName || w.repo || w.branch || "worktree");
+  setText(document.getElementById("modal-sub"), [w.repo, w.branch].filter(Boolean).join(" · "));
 
-  if (w.agents && w.agents.length) {
-    const agentsBox = el("div", "agents");
-    for (const a of w.agents) {
-      for (const row of renderAgent(a, 0)) agentsBox.append(row);
+  const body = document.getElementById("modal-body");
+  const flat = [];
+  flattenAgentsForModal(w.agents, 0, flat);
+
+  let empty = body.querySelector(".empty-state");
+  if (!flat.length) {
+    if (!empty) {
+      empty = el("div", "empty-state small", [document.createTextNode("No agents running here.")]);
+      body.append(empty);
     }
-    card.append(agentsBox);
+  } else if (empty) {
+    empty.remove();
   }
 
-  return card;
+  const seen = new Set();
+  let prevNode = null;
+  for (const { key, agent, depth } of flat) {
+    seen.add(key);
+    let row = modalRowNodes.get(key);
+    if (!row) {
+      row = buildAgentRow();
+      modalRowNodes.set(key, row);
+    }
+    updateAgentRow(row, agent, depth);
+    // Only reposition when actually out of place — see the comment on the
+    // identical guard in renderCards(). This is the specific fix for the
+    // reply textarea losing focus (and the iPad keyboard dismissing) a
+    // moment after tapping it: without the guard, every poll re-inserted
+    // the row even when its order hadn't changed, which blurs whatever was
+    // focused inside it.
+    if (prevNode) {
+      if (prevNode.nextElementSibling !== row) prevNode.after(row);
+    } else if (body.firstElementChild !== row) {
+      body.prepend(row);
+    }
+    prevNode = row;
+  }
+
+  for (const [key, row] of modalRowNodes) {
+    if (!seen.has(key)) {
+      row.remove();
+      modalRowNodes.delete(key);
+    }
+  }
 }
+
+// ------------------------------------------------------------------- usage
+
+function pctClass(pct) {
+  if (pct >= 90) return "gauge-fill danger";
+  if (pct >= 70) return "gauge-fill warn";
+  return "gauge-fill";
+}
+
+function buildGauge(providerLabel, windowLabel, w) {
+  const pct = Math.max(0, Math.min(100, Number(w.usedPercent) || 0));
+  const wrap = el("div", "gauge");
+  const head = el("div", "gauge-head");
+  const name = el("span", "gauge-name");
+  name.textContent = `${providerLabel} · ${windowLabel}`;
+  const val = el("span", "gauge-pct");
+  val.textContent = `${Math.round(pct)}%`;
+  head.append(name, val);
+  const track = el("div", "gauge-track");
+  const fill = el("div", pctClass(pct));
+  fill.style.width = pct + "%";
+  track.append(fill);
+  const foot = el("div", "gauge-foot");
+  foot.textContent = w.resetDescription ? `resets ${w.resetDescription}` : "";
+  wrap.append(head, track, foot);
+  return wrap;
+}
+
+const WINDOW_LABELS = { session: "session", weekly: "weekly", monthly: "monthly" };
+
+// ------------------------------------------------------------------- mascot
+
+// Same priority-ladder idea as Clawdeck's crab mood (sidecrab.js): each state
+// only matters if nothing higher in the list already answered. Connection
+// trouble outranks everything — a mascot reacting to session state it can no
+// longer see would be the panel claiming a live opinion about a dead feed.
+function computeMood(doc) {
+  // Never successfully polled yet (first load) reads as asleep, matching the
+  // crab's own "connecting -> asleep"; anything gone wrong AFTER data has
+  // loaded at least once reads as attn (its "stale -> worried").
+  if (doc.error) return doc.generatedAt === null ? "idle" : "attn";
+  let working = 0;
+  let attn = 0;
+  let total = 0;
+  for (const w of doc.worktrees || []) {
+    const r = rollup(w);
+    total += r.agentCount;
+    if (r.band === 0) attn++;
+    else if (r.band === 1) working++;
+  }
+  if (attn > 0) return "attn";
+  if (working > 0) return "working";
+  if (total === 0) return "idle";
+  return "done";
+}
+
+let prevMood = null;
+
+// Shared between the real hero mascot and every ?mock=puppy preview (which
+// clones the whole .mascot-wrap) — scoped by class/data-role rather than id,
+// since clones must not carry duplicate ids.
+function populateOrcaChat(root) {
+  const slot = root.querySelector(".orca-chat");
+  if (slot && !slot.firstChild) slot.append(chatIcon());
+}
+
+function setMascotMood(root, mood) {
+  const front = root.querySelector(".orca-front");
+  if (front && front.dataset.mood !== mood) front.dataset.mood = mood;
+  if (root.dataset.mood !== mood) root.dataset.mood = mood;
+  populateOrcaChat(root);
+}
+
+// The one-shot hop + splash: the exact trigger the crab uses — a working
+// mood just landed on "nothing working or waiting", i.e. the last session
+// finished. Both live on a timer rather than an animationend listener so a
+// second trigger mid-flight (rare, but the mock page's button allows it)
+// cleanly restarts rather than leaving stale classes.
+function triggerMascotBounce(root) {
+  const front = root.querySelector(".orca-front");
+  root.classList.add("bounce");
+  if (front) front.classList.add("bounce");
+  setTimeout(() => {
+    root.classList.remove("bounce");
+    if (front) front.classList.remove("bounce");
+  }, 800);
+}
+
+function updateMascot(doc) {
+  const wrap = document.getElementById("mascot-wrap");
+  const mood = computeMood(doc);
+  if (prevMood === "working" && mood === "done") triggerMascotBounce(wrap);
+  prevMood = mood;
+  setMascotMood(wrap, mood);
+
+  // The mascot itself is fixed white now — this is where the aggregate mood's
+  // colour and icon actually live, right beside the clock.
+  const heroState = document.getElementById("hero-state");
+  const MOOD_LABEL = { working: "Working", attn: "Needs attention", done: "Done" };
+  heroState.className = mood;
+  heroState.textContent = "";
+  if (MOOD_LABEL[mood]) {
+    const label = document.createElement("span");
+    label.textContent = MOOD_LABEL[mood];
+    heroState.append(stateIconNode(mood), label);
+  }
+}
+
+function pad2(n) {
+  return (n < 10 ? "0" : "") + n;
+}
+
+function tickClock() {
+  const now = new Date();
+  setText(document.getElementById("clock-hm"), pad2(now.getHours()) + ":" + pad2(now.getMinutes()));
+  setText(document.getElementById("clock-ss"), pad2(now.getSeconds()));
+  let dateStr;
+  try {
+    dateStr = now.toLocaleDateString(undefined, { weekday: "short", day: "2-digit", month: "short" });
+  } catch (err) {
+    dateStr = now.toDateString();
+  }
+  setText(document.getElementById("clock-date"), dateStr);
+}
+
+function renderUsage(rateLimits) {
+  const list = document.getElementById("usage-list");
+  const empty = document.getElementById("usage-empty");
+  list.textContent = "";
+  const providers = rateLimits || [];
+  empty.hidden = providers.length > 0;
+  for (const p of providers) {
+    for (const key of ["session", "weekly", "monthly"]) {
+      const w = p.windows && p.windows[key];
+      if (w) list.append(buildGauge(p.label, WINDOW_LABELS[key], w));
+    }
+  }
+}
+
+// ------------------------------------------------------------------- poll
 
 function render(doc) {
-  const app = document.getElementById("app");
-  const empty = document.getElementById("empty");
-  const status = document.getElementById("topbar-status");
+  const status = document.getElementById("hero-status");
   const banner = document.getElementById("token-banner");
 
   if (doc.error) {
@@ -201,26 +771,99 @@ function render(doc) {
   }
   banner.hidden = true;
 
-  [...app.querySelectorAll(".card")].forEach((n) => n.remove());
+  lastGoodDoc = doc;
+  renderCards(doc.worktrees || []);
+  renderUsage(doc.rateLimits || []);
+  updateMascot(doc);
 
-  const worktrees = doc.worktrees || [];
-  empty.hidden = worktrees.length > 0;
-  for (const w of worktrees) {
-    app.append(renderWorktree(w));
+  if (openModalId) {
+    const w = (doc.worktrees || []).find((x) => x.worktreeId === openModalId);
+    if (w) renderModal(w);
+    else closeModal();
   }
 }
 
 async function poll() {
+  const status = document.getElementById("hero-status");
+  let doc;
   try {
     const res = await fetch("/v1/state", { cache: "no-store" });
-    const doc = await res.json();
+    doc = await res.json();
+  } catch (err) {
+    // A genuine network/parse failure — orcad is actually unreachable.
+    status.textContent = "unreachable";
+    status.className = "dead";
+    return;
+  }
+  try {
     render(doc);
   } catch (err) {
-    const status = document.getElementById("topbar-status");
-    status.textContent = "unreachable";
+    // Not a connectivity problem — the fetch above succeeded. Reported
+    // distinctly so a rendering bug is never mistaken for orcad being down.
+    console.error("orcaDeck render failed:", err);
+    status.textContent = "render error — see console";
     status.className = "dead";
   }
 }
 
-poll();
-setInterval(poll, POLL_MS);
+document.getElementById("filter-chip").addEventListener("click", (ev) => {
+  const idx = FILTER_MODES.indexOf(filterMode);
+  filterMode = FILTER_MODES[(idx + 1) % FILTER_MODES.length];
+  ev.target.textContent = FILTER_LABELS[filterMode];
+  ev.target.dataset.filter = filterMode;
+  if (lastGoodDoc) renderCards(lastGoodDoc.worktrees || []);
+});
+
+document.getElementById("modal-close").addEventListener("click", closeModal);
+document.getElementById("modal-backdrop").addEventListener("click", closeModal);
+
+// ------------------------------------------------------------- ?mock=puppy
+
+// A static showcase of every mascot mood, mirroring Clawdeck's own ?mock=
+// convention for inspecting its crab. Swaps in for the live dashboard
+// entirely — no /v1/state poll, no clock — the content in index.html
+// explains each mood's trigger/duration; this just wires up the live
+// mascot clones and the one-shot bounce demo button.
+function initPuppyMock() {
+  document.getElementById("hero").hidden = true;
+  document.getElementById("app").hidden = true;
+  document.getElementById("mock-puppy").hidden = false;
+
+  // The static placeholder spans in the markup (.icon-chat/.icon-check) have
+  // no content of their own — they're SVG-only classes. Swap in the real,
+  // same-code-path icon nodes rather than hand-duplicating the paths here.
+  document.querySelectorAll("h2 > .icon-chat").forEach((el) => el.replaceWith(chatIcon()));
+  document.querySelectorAll("h2 > .icon-check").forEach((el) => el.replaceWith(checkIcon()));
+
+  // Clone the WHOLE wrap (front + side + chat decoration + splash), not just
+  // the front SVG — otherwise the Working preview would have no side-view to
+  // show and the Needs-attention preview no chat bubble to pop up. Every id
+  // inside must be stripped: several previews exist at once, and ids must be
+  // unique per document.
+  const realWrap = document.getElementById("mascot-wrap");
+  document.querySelectorAll(".mock-mood-preview[data-mood]").forEach((slot) => {
+    const clone = realWrap.cloneNode(true);
+    clone.removeAttribute("id");
+    clone.querySelectorAll("[id]").forEach((el) => el.removeAttribute("id"));
+    setMascotMood(clone, slot.dataset.mood);
+    slot.appendChild(clone);
+    if ("bounceTarget" in slot.dataset) {
+      const btn = document.getElementById("mock-bounce-btn");
+      btn.addEventListener("click", () => triggerMascotBounce(clone));
+    }
+  });
+}
+
+const mockMode = new URLSearchParams(window.location.search).get("mock");
+if (mockMode === "puppy") {
+  initPuppyMock();
+} else {
+  poll();
+  setInterval(poll, POLL_MS);
+
+  // The clock ticks at 1 Hz on its own, independent of the 2s data poll — a
+  // clock that only moved when orcad answered would stutter and lag behind
+  // real time, same reasoning as Clawdeck's own 1 Hz tick() (sidecrab.js).
+  tickClock();
+  setInterval(tickClock, 1000);
+}

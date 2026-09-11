@@ -1,0 +1,60 @@
+#!/usr/bin/env python3
+"""orcadeck — the CLI. `orcadeck serve` starts orcad in this terminal and
+prints the local + LAN URL to open on your iPad, exactly like orcad.py's own
+startup banner (this just execs it — no separate logic to keep in sync).
+"""
+from __future__ import annotations
+
+import os
+import shutil
+import subprocess
+import sys
+from pathlib import Path
+
+REPO_ROOT = Path(__file__).resolve().parent.parent
+ORCAD = REPO_ROOT / "orcad" / "orcad.py"
+
+USAGE = """\
+Usage: orcadeck <command> [options]
+
+Commands:
+  serve   Start orcad and print the URL to open on your iPad (Ctrl-C to stop)
+
+Options passed after `serve` go straight to orcad.py, e.g.:
+  orcadeck serve --port 9000
+"""
+
+
+def cmd_serve(args: list[str]) -> int:
+    if not shutil.which("orca"):
+        print(
+            "orcadeck: `orca` is not on PATH — install/open Orca first "
+            "(orcad shells out to it for every worktree/agent poll).",
+            file=sys.stderr,
+        )
+        return 1
+    # PYTHONUNBUFFERED: without a real TTY (piped into `tee`, a log file, a
+    # wrapper script) Python fully-buffers stdout instead of line-buffering
+    # it, so the URL banner can sit unflushed for a while. Forcing it makes
+    # `orcadeck serve` behave the same piped as it does in a plain terminal.
+    env = {**os.environ, "PYTHONUNBUFFERED": "1"}
+    try:
+        return subprocess.run([sys.executable, str(ORCAD), *args], env=env).returncode
+    except KeyboardInterrupt:
+        return 0
+
+
+def main() -> int:
+    argv = sys.argv[1:]
+    if not argv or argv[0] in ("-h", "--help"):
+        print(USAGE, end="")
+        return 0
+    command, rest = argv[0], argv[1:]
+    if command == "serve":
+        return cmd_serve(rest)
+    print(f"orcadeck: unknown command {command!r}\n\n{USAGE}", end="", file=sys.stderr)
+    return 1
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

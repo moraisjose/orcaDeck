@@ -145,6 +145,14 @@ def _nest_agents(raw_agents: list[dict], term_index: dict[str, dict]) -> list[di
             "parentPaneKey": a.get("parentPaneKey"),
             "agentType": a.get("agentType"),
             "state": a.get("state"),
+            # `state: "working"` alone is not enough to mean "actually
+            # working" — Orca's own UI (checked against its bundled source,
+            # terminal-tab-activity-status.js) treats `workingMode:
+            # "monitoring"` as a distinct, separate case: the agent finished
+            # its turn and is idling/waiting, not crunching. Dropping this
+            # field is what let a session asking the user a question render
+            # as "Working" instead of "Needs attention".
+            "workingMode": a.get("workingMode"),
             "displayName": a.get("displayName"),
             "taskTitle": a.get("taskTitle"),
             "prompt": a.get("prompt"),
@@ -211,6 +219,45 @@ def project_state(ps_result: Any, terminals_result: Any) -> dict:
     }
 
 
+# `orca account list --json` carries a `rateLimits` block keyed by provider —
+# every harness Orca can track usage for, not only Claude. Label order here is
+# also render order for the usage panel.
+PROVIDER_LABELS = {
+    "claude": "Claude",
+    "codex": "Codex",
+    "gemini": "Gemini",
+    "opencodeGo": "OpenCode",
+    "kimi": "Kimi",
+    "antigravity": "Antigravity",
+    "minimax": "MiniMax",
+    "grok": "Grok",
+}
+
+
+def project_rate_limits(account_result: Any) -> list[dict]:
+    """Only providers with a real, usable reading make it into the panel — a
+    harness with no account connected (`status != "ok"`) has nothing to show
+    and is left out entirely rather than rendered as a broken gauge."""
+    raw = (account_result or {}).get("rateLimits") or {}
+    out: list[dict] = []
+    for provider, label in PROVIDER_LABELS.items():
+        entry = raw.get(provider)
+        if not isinstance(entry, dict) or entry.get("status") != "ok":
+            continue
+        windows: dict[str, dict] = {}
+        for window_key in ("session", "weekly", "monthly"):
+            w = entry.get(window_key)
+            if isinstance(w, dict) and isinstance(w.get("usedPercent"), (int, float)):
+                windows[window_key] = {
+                    "usedPercent": w.get("usedPercent"),
+                    "resetsAt": w.get("resetsAt"),
+                    "resetDescription": w.get("resetDescription"),
+                }
+        if windows:
+            out.append({"provider": provider, "label": label, "windows": windows})
+    return out
+
+
 # --------------------------------------------------------------------------- poller
 
 
@@ -246,11 +293,26 @@ def poll_forever(binary: str, store: StateStore, interval: float, stop_event: th
         try:
             ps = run_orca_json(binary, "worktree", "ps")
             terms = run_orca_json(binary, "terminal", "list")
-            store.set_ok(project_state(ps, terms))
+            state = project_state(ps, terms)
         except OrcaCliError as exc:
             store.set_error(str(exc))
+            stop_event.wait(interval)
+            continue
         except Exception as exc:  # keep polling no matter what goes wrong
             store.set_error(f"unexpected: {exc}")
+            stop_event.wait(interval)
+            continue
+
+        # Usage is a separate CLI call — its failure (e.g. no accounts
+        # configured) must not take down the worktree/agent feed that already
+        # succeeded above.
+        try:
+            accounts = run_orca_json(binary, "account", "list")
+            state["rateLimits"] = project_rate_limits(accounts)
+        except Exception:
+            state["rateLimits"] = []
+
+        store.set_ok(state)
         stop_event.wait(interval)
 
 
@@ -333,6 +395,19 @@ class Handler(BaseHTTPRequestHandler):
         self.send_response(200)
         self.send_header("Content-Type", ctype)
         self.send_header("Content-Length", str(len(body)))
+        # Logos never change without a redeploy — cache them so a full
+        # DOM rebuild every poll doesn't re-fetch/re-decode them (that
+        # re-decode is what looked like a "blinking" logo). HTML/JS/CSS stay
+        # uncached so an edit shows up on next reload.
+        if rel.startswith("assets/"):
+            self.send_header("Cache-Control", "public, max-age=86400")
+        else:
+            # no-store, not no-cache: this response carries no ETag/Last-
+            # Modified, so a "no-cache" revalidation has nothing to
+            # revalidate against and some WebKit versions fall back to
+            # serving the cached copy anyway — silently running stale
+            # panel.js on a fast-iterating dev loop like this one.
+            self.send_header("Cache-Control", "no-store")
         self.end_headers()
         self.wfile.write(body)
 
