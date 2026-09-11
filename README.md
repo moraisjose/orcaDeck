@@ -10,8 +10,6 @@
 
   <img alt="stdlib only" src="https://img.shields.io/badge/dependencies-none-brightgreen.svg">
 
-  <a href="https://github.com/moraisjose/orcaDeck/stargazers"><img alt="GitHub stars" src="https://img.shields.io/github/stars/moraisjose/orcaDeck?style=social"></a>
-
 </p>
 
 A live panel of everything [Orca](https://orcaapp.dev) is running — every
@@ -20,7 +18,11 @@ with the ability to reply into a session from there. The panel is built to
 run on legacy WebKit too, all the way back to iOS 10 Safari — that old
 tablet in a drawer can be a dashboard again.
 
-## Install
+<p align="center"><img src="docs/screenshot.png" alt="orcaDeck panel" width="700">
+
+</p>
+
+## Install and Usage
 
 You need [Orca](https://orcaapp.dev) installed (`orca` on PATH) and Python
 3.9+ — no other dependencies.
@@ -32,16 +34,13 @@ curl -fsSL https://raw.githubusercontent.com/moraisjose/orcaDeck/main/install.sh
 orcadeck serve
 ```
 
-**Claude Code** — ask it to set up orcaDeck; the bundled `setup-orcadeck`
-skill checks prerequisites, starts the server, and hands you the URL to open
+
+
+**Agent**
+
+**Claude Code** — ask it to set up orcaDeck; the bundled `setup-orcadeck`  
+skill checks prerequisites, starts the server, and hands you the URL to open  
 on your other device.
-
-## Use it
-
-`orcadeck serve` prints a local and a LAN URL. Open the **LAN** one in that
-device's browser once — the token pairs it — then bookmark the plain
-`http://<ip>:8720/` from then on, or add it to its Home Screen. Tap **Reply**
-on any session to send text straight into it.
 
 ## How it works
 
@@ -51,7 +50,6 @@ process/port. Full design: [`docs/design.md`](docs/design.md).
 
 ## Props
 
-A sibling to [Clawdeck](https://github.com/Dixie-sketch/Clawdeck), same "small companion + polling panel" shape, sourced from Orca
-instead of Claude Code's hooks, so it sees every harness Orca runs, not only
-Claude.
-
+A sibling to [Clawdeck](https://github.com/Dixie-sketch/Clawdeck), same
+"small companion + polling panel" shape, sourced from Orca instead of Claude
+Code's hooks, so it sees every harness Orca runs, not only Claude.

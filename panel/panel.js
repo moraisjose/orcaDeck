@@ -854,9 +854,115 @@ function initPuppyMock() {
   });
 }
 
+// ------------------------------------------------------------- ?mock=panel
+
+// A fabricated /v1/state document for screenshots (the README, mainly) —
+// real data would mean a real repo/branch/session name in a public image.
+// Every field here is fictional; only the SHAPE matches what orcad actually
+// serves. Renders through the exact same render() as live data, no special
+// cases, so a screenshot of this is honestly what the panel looks like.
+function fakePanelDoc() {
+  const now = Date.now();
+  const ago = (ms) => now - ms;
+  const agent = (overrides) =>
+    Object.assign(
+      {
+        paneKey: Math.random().toString(36).slice(2),
+        parentPaneKey: null,
+        agentType: "claude",
+        state: "done",
+        workingMode: null,
+        interrupted: false,
+        displayName: null,
+        taskTitle: null,
+        prompt: null,
+        lastAssistantMessage: null,
+        toolName: null,
+        toolInput: null,
+        stateStartedAt: ago(60000),
+        updatedAt: ago(30000),
+        terminalHandle: "term_mock",
+        connected: true,
+        writable: true,
+        children: [],
+      },
+      overrides
+    );
+  const wt = (overrides) =>
+    Object.assign(
+      {
+        worktreeId: Math.random().toString(36).slice(2),
+        repo: "repo",
+        displayName: "session",
+        branch: "refs/heads/main",
+        path: "/repo",
+        status: "active",
+        isMainWorktree: false,
+        lastActivityAt: ago(120000),
+        lastOutputAt: ago(60000),
+        agents: [],
+      },
+      overrides
+    );
+
+  return {
+    schema: 1,
+    generatedAt: new Date().toISOString(),
+    error: null,
+    stale: false,
+    rateLimits: [
+      { provider: "claude", label: "Claude", windows: { session: { usedPercent: 34, resetDescription: "9:10 PM" }, weekly: { usedPercent: 21, resetDescription: "Fri 1:00 AM" } } },
+      { provider: "opencodeGo", label: "OpenCode", windows: { session: { usedPercent: 12, resetDescription: "11:45 PM" } } },
+    ],
+    worktrees: [
+      wt({
+        repo: "api-gateway", displayName: "Rate limit bug", branch: "refs/heads/fix/rate-limit-bug",
+        agents: [agent({ state: "working", workingMode: "monitoring", prompt: "any update?", lastAssistantMessage: "Found it — the retry loop doesn't back off. Want me to add jittered backoff or just cap the retries?", stateStartedAt: ago(90000), updatedAt: ago(20000) })],
+      }),
+      wt({
+        repo: "checkout-flow", displayName: "Add Apple Pay", branch: "refs/heads/feat/apple-pay",
+        agents: [agent({ state: "working", toolName: "Bash", toolInput: "npm test -- checkout", stateStartedAt: ago(45000), updatedAt: ago(3000) })],
+      }),
+      wt({
+        repo: "docs-site", displayName: "Rewrite quickstart", branch: "refs/heads/docs/quickstart",
+        agents: [agent({ state: "working", agentType: "opencode", toolName: "Write", toolInput: "docs/quickstart.md", updatedAt: ago(8000) })],
+      }),
+      wt({
+        repo: "billing-service", displayName: "Fix invoice rounding", branch: "refs/heads/fix/invoice-rounding",
+        lastActivityAt: ago(3600000), lastOutputAt: ago(3600000),
+        agents: [agent({ state: "done", toolName: "Bash", toolInput: "pytest tests/billing -q", updatedAt: ago(3600000) })],
+      }),
+      wt({
+        repo: "onboarding-redesign", displayName: "Wizard step 3", branch: "refs/heads/feat/wizard-step-3",
+        lastActivityAt: ago(5400000), lastOutputAt: ago(5400000),
+        agents: [
+          agent({
+            state: "done", lastAssistantMessage: "Dispatched two subagents — one for the form validation, one for the tests. Both finished clean.",
+            updatedAt: ago(5400000),
+            children: [
+              agent({ state: "done", agentType: "opencode", toolName: "Edit", toolInput: "src/wizard/Step3.tsx", updatedAt: ago(5450000) }),
+              agent({ state: "done", toolName: "Bash", toolInput: "npm test -- wizard", updatedAt: ago(5500000) }),
+            ],
+          }),
+        ],
+      }),
+      wt({ repo: "mobile-app", displayName: "main", branch: "refs/heads/main", isMainWorktree: true, status: "inactive", lastActivityAt: ago(9 * 3600000), lastOutputAt: ago(9 * 3600000), agents: [] }),
+      wt({ repo: "internal-tools", displayName: "main", branch: "refs/heads/main", isMainWorktree: true, status: "inactive", lastActivityAt: ago(26 * 3600000), lastOutputAt: ago(26 * 3600000), agents: [] }),
+    ],
+  };
+}
+
+function initPanelMock() {
+  render(fakePanelDoc());
+  tickClock();
+  setInterval(tickClock, 1000);
+}
+
 const mockMode = new URLSearchParams(window.location.search).get("mock");
 if (mockMode === "puppy") {
   initPuppyMock();
+} else if (mockMode === "panel") {
+  initPanelMock();
 } else {
   poll();
   setInterval(poll, POLL_MS);
