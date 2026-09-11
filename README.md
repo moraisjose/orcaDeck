@@ -1,60 +1,57 @@
-# orcaDeck 🐋
+<p align="center"><img src="docs/orcadeck.gif" alt="orcaDeck" width="480">
+
+</p>
+
+<p align="center">
+
+  <a href="LICENSE"><img alt="License: MIT" src="https://img.shields.io/badge/license-MIT-blue.svg"></a>
+
+  <img alt="Python 3.9+" src="https://img.shields.io/badge/python-3.9%2B-blue.svg">
+
+  <img alt="stdlib only" src="https://img.shields.io/badge/dependencies-none-brightgreen.svg">
+
+  <a href="https://github.com/moraisjose/orcaDeck/stargazers"><img alt="GitHub stars" src="https://img.shields.io/github/stars/moraisjose/orcaDeck?style=social"></a>
+
+</p>
 
 A live panel of everything [Orca](https://orcaapp.dev) is running — every
-worktree, every agent, every subagent, every harness — servable to any device
-on your LAN (an iPad, say), with the ability to reply into a session from
-there. A sibling to [SideCrab](https://github.com/Dixie-sketch/Clawdeck), not
-a fork of it: same "small companion + polling panel" shape, sourced from Orca
-instead of Claude Code's hooks, so it sees every harness Orca runs, not only
-Claude.
+worktree, agent, subagent, and harness — servable to any device on your LAN,
+with the ability to reply into a session from there. The panel is built to
+run on legacy WebKit too, all the way back to iOS 10 Safari — that old
+tablet in a drawer can be a dashboard again.
 
-## What you need
+## Install
 
-- **Orca**, installed and running (its `orca` CLI needs to resolve on PATH).
-- **Python 3.9+** — stdlib only, no dependencies to install.
+You need [Orca](https://orcaapp.dev) installed (`orca` on PATH) and Python
+3.9+ — no other dependencies.
 
-## Run it
+**CLI**
 
 ```
-scripts/run.sh
+curl -fsSL https://raw.githubusercontent.com/moraisjose/orcaDeck/main/install.sh | sh
+orcadeck serve
 ```
 
-This prints two URLs:
+**Claude Code** — ask it to set up orcaDeck; the bundled `setup-orcadeck`
+skill checks prerequisites, starts the server, and hands you the URL to open
+on your other device.
 
-```
-local:  http://127.0.0.1:8720/?token=...
-LAN:    http://192.168.x.x:8720/?token=...
-```
+## Use it
 
-Open the **LAN** one on your iPad's Safari, once — the token pairs that
-browser and is remembered from then on (`localStorage`), so day to day you
-can just bookmark `http://192.168.x.x:8720/`. Add it to the iPad's Home
-Screen for a full-screen panel.
-
-Environment variables, if you want non-defaults: `ORCAD_PORT` (default
-`8720`), `ORCAD_BIND` (default `0.0.0.0`), `ORCAD_POLL_INTERVAL` seconds
-(default `2`).
-
-## What it shows
-
-One card per worktree — status dot, name, branch, the `primary` chip on your
-main worktree — and under it, one row per agent Orca is running there, with
-its harness logo, its current state and tool, and subagents nested under
-their parent exactly the way Orca's own sidebar shows them.
-
-Tap **Reply** on any row with a live terminal to send text straight into that
-session.
+`orcadeck serve` prints a local and a LAN URL. Open the **LAN** one in that
+device's browser once — the token pairs it — then bookmark the plain
+`http://<ip>:8720/` from then on, or add it to its Home Screen. Tap **Reply**
+on any session to send text straight into it.
 
 ## How it works
 
-See [`docs/design.md`](docs/design.md) for the full design. In short: `orcad`
-polls `orca worktree ps --json` + `orca terminal list --json` every couple of
-seconds, projects them into one JSON document, and serves that plus the
-panel itself from one process/port — no separate proxy step, unlike
-SideCrab's iCUE-widget split.
+`orcad` polls `orca worktree ps` + `orca terminal list`, projects them into
+one JSON document, and serves that plus the panel itself from one
+process/port. Full design: [`docs/design.md`](docs/design.md).
 
-## Status
+## Props
 
-v0.1.0 — read the tree, reply into a session. Richer write actions
-(answering orchestration questions/gates directly) are a natural next step;
-see the design doc's non-goals.
+A sibling to [Clawdeck](https://github.com/Dixie-sketch/Clawdeck), same "small companion + polling panel" shape, sourced from Orca
+instead of Claude Code's hooks, so it sees every harness Orca runs, not only
+Claude.
+
