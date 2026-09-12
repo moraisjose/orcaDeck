@@ -59,7 +59,7 @@ A sibling to [Clawdeck](https://github.com/Dixie-sketch/Clawdeck), same
 "small companion + polling panel" shape, sourced from Orca instead of Claude
 Code's hooks, so it sees every harness Orca runs, not only Claude.
 
-orcaDeck is an independent project and is not affiliated with or endorsed by
+_orcaDeck is an independent project and is not affiliated with or endorsed by
 Orca or the harness vendors; *Orca*, *Claude*, *Codex*, and *OpenCode* are
 their respective owners' marks, named here only to say what the panel works
-with.
+with._
