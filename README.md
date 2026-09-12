@@ -31,7 +31,7 @@ orcadeck serve
 
 **Agent**
 
-**Claude Code** — ask it to set up orcaDeck; the bundled `setup-orcadeck`
+**Coding agent** — ask it to set up orcaDeck; the bundled `setup-orcadeck`
 skill checks prerequisites, starts the server, and hands you the URL to open
 on your other device.
 
