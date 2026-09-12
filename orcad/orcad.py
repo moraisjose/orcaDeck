@@ -63,7 +63,13 @@ ACTION_INTERRUPT = "interrupt"
 
 
 class OrcaCliError(RuntimeError):
-    pass
+    def __init__(self, message: str, error: dict | None = None) -> None:
+        super().__init__(message)
+        # The structured `error` payload orca itself returned, when there
+        # was one — e.g. `agent_prompt_blocked` carries a retry-request id
+        # in `error["data"]["orchestrationRequestId"]` that callers need
+        # without having to regex it back out of the message string.
+        self.error = error or {}
 
 
 def find_orca_binary() -> str:
@@ -100,8 +106,54 @@ def run_orca_json(binary: str, *args: str, timeout: float = CLI_TIMEOUT_SEC) -> 
         raise OrcaCliError(f"`{' '.join(cmd)}` did not return JSON: {exc}") from exc
 
     if doc.get("ok") is False:
-        raise OrcaCliError(f"`{' '.join(cmd)}` reported failure: {doc.get('error') or doc}")
+        err = doc.get("error")
+        raise OrcaCliError(
+            f"`{' '.join(cmd)}` reported failure: {err or doc}",
+            error=err if isinstance(err, dict) else None,
+        )
     return doc.get("result", doc)
+
+
+# `orca terminal send` separates "did the CLI accept these bytes" from "did
+# the agent's turn actually start" — a bare send can come back `ok: true`
+# with delivery still unconfirmed (no `turn_started` stage yet), or
+# `ok: false` with `agent_prompt_blocked` (an ambiguous transport failure).
+# Both responses carry the exact retry-request id to reissue with
+# `--retry-request`/`--wait-submit` to get a real answer. Doing that reissue
+# here means a reply from the panel comes back confirmed, not a "maybe" the
+# person has to go verify by hand against a second terminal.
+def send_text_confirmed(
+    binary: str, handle: str, text: str, enter: bool, wait_submit: float = 8.0
+) -> Any:
+    args = ["terminal", "send", "--terminal", handle, "--text", text]
+    if enter:
+        args.append("--enter")
+
+    def confirm(request_id: str) -> Any:
+        return run_orca_json(
+            binary,
+            *args,
+            "--retry-request",
+            request_id,
+            "--wait-submit",
+            str(wait_submit),
+            timeout=wait_submit + CLI_TIMEOUT_SEC,
+        )
+
+    try:
+        result = run_orca_json(binary, *args)
+    except OrcaCliError as exc:
+        request_id = (exc.error.get("data") or {}).get("orchestrationRequestId")
+        if not request_id:
+            raise
+        return confirm(request_id)
+
+    prompt = (result.get("send") or {}).get("prompt") if isinstance(result, dict) else None
+    stages = (prompt or {}).get("stages") or []
+    request_id = (prompt or {}).get("requestId")
+    if request_id and "turn_started" not in stages:
+        return confirm(request_id)
+    return result
 
 
 # --------------------------------------------------------------------------- projection
@@ -418,10 +470,39 @@ class Handler(BaseHTTPRequestHandler):
         if path == "/v1/state":
             self._send_json(200, self.store.snapshot())
             return
+        if path == "/v1/terminal-tail":
+            self._handle_terminal_tail()
+            return
         if path == "/" or not path.startswith("/v1/"):
             self._serve_static(path)
             return
         self.send_error(404, "not found")
+
+    def _handle_terminal_tail(self) -> None:
+        # What the modal's reply box can't infer from `/v1/state` alone: a
+        # session waiting on a keypress-driven permission menu (not a chat
+        # question) has no `lastAssistantMessage` at all, so the panel had
+        # nothing to show for "what is this session actually asking". This
+        # mirrors the rendered screen straight from the CLI so that content
+        # reaches the reply device too. Same auth model as `/v1/state` — it's
+        # a read, not a write, so it isn't gated behind the action token.
+        query = urllib.parse.parse_qs(urllib.parse.urlparse(self.path).query)
+        handle = (query.get("handle") or [None])[0]
+        if not handle:
+            self._send_json(400, {"ok": False, "error": "handle is required"})
+            return
+        try:
+            result = run_orca_json(
+                self.binary, "terminal", "read", "--terminal", handle, "--screen", "--limit", "60"
+            )
+        except OrcaCliError as exc:
+            self._send_json(502, {"ok": False, "error": str(exc)})
+            return
+        terminal = result.get("terminal", {}) if isinstance(result, dict) else {}
+        self._send_json(
+            200,
+            {"ok": True, "tail": terminal.get("tail", []), "source": terminal.get("source")},
+        )
 
     def do_POST(self) -> None:  # noqa: N802
         path = urllib.parse.urlparse(self.path).path
@@ -451,10 +532,14 @@ class Handler(BaseHTTPRequestHandler):
             if not text:
                 self._send_json(400, {"ok": False, "error": "text is required"})
                 return
-            args = ["terminal", "send", "--terminal", handle, "--text", text]
-            if body.get("enter", True):
-                args.append("--enter")
-        elif action == ACTION_INTERRUPT:
+            try:
+                result = send_text_confirmed(self.binary, handle, text, body.get("enter", True))
+                self._send_json(200, {"ok": True, "result": result})
+            except OrcaCliError as exc:
+                self._send_json(502, {"ok": False, "error": str(exc)})
+            return
+
+        if action == ACTION_INTERRUPT:
             args = ["terminal", "send", "--terminal", handle, "--interrupt"]
         else:
             self._send_json(400, {"ok": False, "error": f"unknown action type {action!r}"})

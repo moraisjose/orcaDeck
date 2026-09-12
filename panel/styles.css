@@ -255,13 +255,13 @@ svg.state-icon {
   .spin-ring { animation: none; border-top-color: var(--working); }
 }
 
-.card-state {
+.card-state-icon {
   display: flex;
   align-items: center;
-  gap: 7px;
+  flex: none;
 }
-.card-state .state-icon { width: 14px; height: 14px; }
-.card-state .spin-ring { width: 12px; height: 12px; }
+.card-state-icon .state-icon { width: 14px; height: 14px; }
+.card-state-icon .spin-ring { width: 12px; height: 12px; }
 
 /* ------------------------------------------------------------ layout */
 
@@ -428,6 +428,7 @@ svg.state-icon {
 /* ------------------------------------------------------------ session cards (compact) */
 
 .card {
+  position: relative;
   background: transparent;
   border: 1px solid var(--border);
   border-radius: 12px;
@@ -457,24 +458,21 @@ svg.state-icon {
   .card.attn { animation: none; border-color: var(--pulse-color); }
 }
 
-/* The first, boldest thing on the card: the state word itself, in its own
-   colour — read before the session name below it, not after. */
-.card-state {
-  font-weight: 700;
-  font-size: 13.5px;
-  letter-spacing: .01em;
-  color: var(--muted);
-}
-.card-state.working { color: var(--working); }
-.card-state.attn { color: var(--amber); }
-.card-state.done { color: var(--green); }
+/* The state icon carries the colour on its own now — no separate state-word
+   line, so this is the only per-state signal left on the card. */
+.card-state-icon { color: var(--muted); }
+.card-state-icon.working { color: var(--working); }
+.card-state-icon.attn { color: var(--amber); }
+.card-state-icon.done { color: var(--green); }
 
 .card-head {
-  margin-top: 6px;
   display: flex;
   align-items: center;
   gap: 10px;
   min-width: 0;
+  /* Leaves room for the harness logo floating at the card's top-right
+     corner, so the "primary" chip's right edge doesn't collide with it. */
+  padding-right: 26px;
 }
 
 .dot {
@@ -488,12 +486,19 @@ svg.state-icon {
 .dot.attn { background: var(--amber); box-shadow: 0 0 0 3px rgba(254, 110, 0, 0.25); }
 .dot.done { background: var(--green); box-shadow: 0 0 0 3px rgba(0, 187, 127, 0.25); }
 
-.card-logo { flex: none; }
+/* Floats in its own corner instead of sitting in the title's reading line —
+   `.card` is the positioned ancestor these coordinates anchor to. */
+.card-logo {
+  position: absolute;
+  top: 14px;
+  right: 16px;
+}
 .card-logo[hidden] { display: none; }
 .card-logo .agent-logo { width: 18px; height: 18px; border-radius: 5px; margin-top: 0; }
 
 .card-title {
   font-weight: 600;
+  color: var(--text);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -655,6 +660,7 @@ svg.state-icon {
   border-radius: 8px;
   max-height: 180px;
   overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
   font-size: 12.5px;
   white-space: pre-wrap;
   word-break: break-word;
@@ -670,12 +676,46 @@ svg.state-icon {
 .agent-context-reply { color: var(--text); }
 .agent-context-reply[hidden] { display: none; }
 
+/* Live mirror of the terminal's rendered screen — the only place a
+   keypress-driven permission menu shows up, since it has no chat message
+   to appear in .agent-context above. */
+.agent-screen {
+  margin: 8px 0 0;
+  padding: 8px 10px;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  max-height: 240px;
+  overflow: auto;
+  -webkit-overflow-scrolling: touch;
+  color: var(--text);
+  font-size: 13.5px;
+  line-height: 1.5;
+  font-family: ui-monospace, "SF Mono", Menlo, monospace;
+  white-space: pre;
+}
+.agent-screen[hidden] { display: none; }
+
 .reply-box {
   margin-top: 10px;
   display: flex;
+  flex-wrap: wrap;
   gap: 6px;
 }
 .reply-box[hidden] { display: none; }
+
+/* A failed send (e.g. orca itself rejecting the input) used to look
+   identical to a successful one — the textarea just cleared with no
+   feedback either way. `flex: 1 1 100%` drops this onto its own line
+   below the textarea/button instead of squeezing into the row. */
+.agent-send-error {
+  flex: 1 1 100%;
+  color: #ff6e6e;
+  font-size: 12px;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+.agent-send-error[hidden] { display: none; }
 
 .reply-box textarea {
   flex: 1;
@@ -789,8 +829,18 @@ svg.state-icon {
 }
 
 .modal-body {
+  /* Without an explicit flex-basis, a flex-column child defaults to
+     `min-height: auto` — it never shrinks below its own content size, so
+     it just grows past .modal-sheet's max-height instead of scrolling.
+     `overflow-y: auto` above was a no-op until this constrained it. */
+  flex: 1 1 auto;
+  min-height: 0;
   overflow-y: auto;
   padding-right: 2px;
+  /* Legacy WebKit needs this explicitly for touch-drag scrolling to work
+     at all inside a nested scroll container — without it, dragging here
+     can do nothing rather than just lose inertia. */
+  -webkit-overflow-scrolling: touch;
 }
 
 @media (min-width: 761px) {

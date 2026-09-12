@@ -16,12 +16,12 @@ for free as Orca adds harnesses.
 ## Integration boundary: the `orca` CLI, not the daemon socket
 
 Orca exposes the same data two ways: a documented, versioned CLI
-(`orca worktree ps --json`, `orca terminal list --json`, `agent-context` for
-the full schema) and a private unix-socket RPC the desktop app itself uses.
-The CLI is the contract Orca commits to keeping stable; the socket is an
-implementation detail with no version guarantee. orcad only ever shells out
-to the CLI. Measured round-trip on this machine: ~80-120ms per call, cheap
-enough to poll every couple of seconds.
+(`orca worktree ps --json`, `orca terminal list --json`, `orca account list
+--json`, `agent-context` for the full schema) and a private unix-socket RPC
+the desktop app itself uses. The CLI is the contract Orca commits to keeping
+stable; the socket is an implementation detail with no version guarantee.
+orcad only ever shells out to the CLI. Measured round-trip on this machine:
+~80-120ms per call, cheap enough to poll every couple of seconds.
 
 ## Shape: one process, not two
 
@@ -33,12 +33,13 @@ feed and the static panel itself**, bound to `0.0.0.0` for LAN reach. One
 process, one port, no proxy.
 
 ```
-orca CLI (worktree ps, terminal list) ──poll──▶ orcad (0.0.0.0:8720)
-                                                    │  GET /v1/state   (read)
-                                                    │  POST /v1/action (write, token-gated)
-                                                    │  GET /, /panel.js, ... (static)
-                                                    ▼
-                                          panel in iPad Safari (polls every 2s)
+orca CLI (worktree ps, terminal list, account list) ──poll──▶ orcad (0.0.0.0:8720)
+                                                                  │  GET /v1/state   (read)
+                                                                  │  GET /v1/terminal-tail (read)
+                                                                  │  POST /v1/action (write, token-gated)
+                                                                  │  GET /, /panel.js, ... (static)
+                                                                  ▼
+                                                          panel in iPad Safari (polls every 2s)
 ```
 
 ## Data projection
@@ -50,7 +51,21 @@ renders from: worktrees with `displayName`/`branch`/`status`/`isMainWorktree`/
 edge *is* the subagent relationship, no extra call needed. `orca terminal
 list --json` is joined in by `paneKey = tabId:leafId` to attach a
 `terminalHandle` to every agent that has a live terminal, which is what makes
-that agent remote-controllable.
+that agent remote-controllable. Each node also carries `workingMode`:
+`state: "working"` alone is not sufficient evidence of active work — Orca's
+own UI treats `workingMode: "monitoring"` as a distinct case (turn finished,
+idling/waiting) — and the panel folds that, plus `interrupted`, into
+"Needs attention".
+
+`orca account list --json` rides the same poll for its `rateLimits` block,
+projected into `state.rateLimits`: one entry per provider Orca tracks usage
+for (`claude`, `codex`, `gemini`, `opencodeGo`, `kimi`, `antigravity`,
+`minimax`, `grok`), shaped
+`{provider, label, windows:{session|weekly|monthly:{usedPercent, resetsAt, resetDescription}}}`.
+Only real, usable readings are emitted — a provider whose status isn't `ok`,
+or with no window carrying a numeric `usedPercent`, is left out entirely
+rather than rendered as a broken gauge; a failure of this call never takes
+down the worktree feed that already succeeded.
 
 Harness identity: `agentType` (`claude`, `opencode`, `codex`, ...) rides
 straight through. Logos are the same static marks Orca's own UI uses
@@ -69,6 +84,15 @@ flows Orca also exposes — `orchestration reply`, `gate-resolve`, threaded
 projection needs to change to add them, since a question/gate is just another
 kind of pending state on a node that already has a `terminalHandle`.
 
+orcad doesn't take the CLI's first answer as final: `send_text_confirmed`
+wraps the send, and when the result's `send.prompt` has a `requestId` without
+`turn_started` among its stages — or the send failed with
+`agent_prompt_blocked`, which carries `error.data.orchestrationRequestId` —
+it reissues with `--retry-request <id> --wait-submit 8` and returns that
+confirmed result instead. The point: a reply sent from the panel comes back
+confirmed, not a "maybe" the person has to verify by hand against a second
+terminal.
+
 ## Auth
 
 orcad binds the LAN and can steer real running agents, so `/v1/action` is
@@ -77,7 +101,8 @@ gated behind a bearer token generated on first run and stored in
 (`http://<lan-ip>:<port>/?token=...`); the panel reads the token from the URL
 once, stores it in `localStorage`, and strips it from the address bar. `GET
 /v1/state` stays open on the LAN — read-only, same posture as crabd's own
-`/v1/state`.
+`/v1/state`; `GET /v1/terminal-tail` (the reply modal's live tail of a
+session's screen) shares that open-read posture.
 
 ## Non-goals for v0.1.0
 
