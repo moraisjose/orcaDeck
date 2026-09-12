@@ -473,27 +473,50 @@ function buildAgentRow() {
   const contextReply = el("div", "agent-context-reply");
   context.append(contextYou, contextReply);
 
+  // Live mirror of the terminal's actual rendered screen — the only place a
+  // keypress-driven permission menu (no chat message, so nothing in
+  // `context` above) ever shows up. Populated by refreshModalScreens(),
+  // not by updateAgentRow(), since it needs its own CLI round-trip.
+  const screen = el("pre", "agent-screen");
+  screen.hidden = true;
+
   const replyBox = el("div", "reply-box");
   const textarea = document.createElement("textarea");
   textarea.placeholder = "Send to this session…";
   const button = document.createElement("button");
   button.textContent = "Send";
+  const sendError = el("div", "agent-send-error");
+  sendError.hidden = true;
   button.onclick = async () => {
     const text = textarea.value.trim();
     const agent = row._agent;
     if (!text || !agent || !agent.terminalHandle) return;
     button.disabled = true;
+    sendError.hidden = true;
     try {
-      await sendAction({ type: "send-text", terminalHandle: agent.terminalHandle, text, enter: true });
+      // sendAction() only throws on 401 — orca itself can reject a send
+      // (e.g. `agent_prompt_blocked`) with a 502 that still resolves here
+      // as {ok:false, error}. Not checking `.ok` was the actual bug behind
+      // "I sent a reply and nothing happened": the textarea cleared as if
+      // it worked, and the failure reason was never shown anywhere.
+      const result = await sendAction({ type: "send-text", terminalHandle: agent.terminalHandle, text, enter: true });
+      if (!result || result.ok === false) {
+        throw new Error((result && result.error) || "send failed");
+      }
       textarea.value = "";
+      // Give the terminal a beat to redraw, then pull the screen so the
+      // user can see whether the reply actually landed.
+      setTimeout(refreshModalScreens, 400);
     } catch (err) {
       console.error(err);
+      setText(sendError, String((err && err.message) || err));
+      sendError.hidden = false;
     } finally {
       button.disabled = false;
     }
   };
-  replyBox.append(textarea, button);
-  main.append(line, detail, context, replyBox);
+  replyBox.append(textarea, button, sendError);
+  main.append(line, detail, context, screen, replyBox);
   row.append(logoSlot, main);
 
   row._logoSlot = logoSlot;
@@ -505,6 +528,7 @@ function buildAgentRow() {
   row._context = context;
   row._contextYou = contextYou;
   row._contextReply = contextReply;
+  row._screen = screen;
   row._replyBox = replyBox;
   row._button = button;
   return row;
@@ -541,6 +565,8 @@ function updateAgentRow(row, agent, depth) {
   if (hasReply) setText(row._contextReply, agent.lastAssistantMessage);
   row._context.hidden = !hasYou && !hasReply;
 
+  if (!agent.terminalHandle) row._screen.hidden = true;
+
   row._replyBox.hidden = !agent.terminalHandle;
   row._button.disabled = !agent.terminalHandle;
 }
@@ -554,6 +580,39 @@ function flattenAgentsForModal(agents, depth, out) {
   }
 }
 
+async function fetchTerminalTail(handle) {
+  const res = await fetch(`/v1/terminal-tail?handle=${encodeURIComponent(handle)}`, { cache: "no-store" });
+  return res.json();
+}
+
+// Trims only trailing padding on each line (TUIs often pad box-drawing
+// output to the full terminal width) — the content itself is left as-is,
+// since it's a mirror of the real screen, not something to reformat.
+function setAgentScreen(row, tailLines) {
+  const text = (tailLines || []).join("\n").replace(/[ \t]+$/gm, "").trim();
+  row._screen.hidden = !text;
+  if (text) setText(row._screen, text);
+}
+
+// Polls each open modal row's own terminal screen — separate from the main
+// /v1/state poll because it's a per-agent CLI round-trip, only worth paying
+// for the handful of rows actually visible in an open modal, not every
+// agent on every worktree every cycle.
+let modalTailTimer = null;
+
+async function refreshModalScreens() {
+  for (const [, row] of modalRowNodes) {
+    const agent = row._agent;
+    if (!row.isConnected || !agent || !agent.terminalHandle) continue;
+    try {
+      const data = await fetchTerminalTail(agent.terminalHandle);
+      if (data && data.ok) setAgentScreen(row, data.tail);
+    } catch (err) {
+      // best-effort — leave the last-known screen content in place
+    }
+  }
+}
+
 function openModal(worktreeId) {
   const doc = lastGoodDoc;
   const w = doc && (doc.worktrees || []).find((x) => x.worktreeId === worktreeId);
@@ -561,11 +620,18 @@ function openModal(worktreeId) {
   openModalId = worktreeId;
   renderModal(w);
   document.getElementById("modal").hidden = false;
+  refreshModalScreens();
+  if (modalTailTimer) clearInterval(modalTailTimer);
+  modalTailTimer = setInterval(refreshModalScreens, POLL_MS);
 }
 
 function closeModal() {
   openModalId = null;
   document.getElementById("modal").hidden = true;
+  if (modalTailTimer) {
+    clearInterval(modalTailTimer);
+    modalTailTimer = null;
+  }
 }
 
 function renderModal(w) {

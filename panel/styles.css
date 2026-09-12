@@ -655,6 +655,7 @@ svg.state-icon {
   border-radius: 8px;
   max-height: 180px;
   overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
   font-size: 12.5px;
   white-space: pre-wrap;
   word-break: break-word;
@@ -670,12 +671,46 @@ svg.state-icon {
 .agent-context-reply { color: var(--text); }
 .agent-context-reply[hidden] { display: none; }
 
+/* Live mirror of the terminal's rendered screen — the only place a
+   keypress-driven permission menu shows up, since it has no chat message
+   to appear in .agent-context above. */
+.agent-screen {
+  margin: 8px 0 0;
+  padding: 8px 10px;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  max-height: 240px;
+  overflow: auto;
+  -webkit-overflow-scrolling: touch;
+  color: var(--text);
+  font-size: 13.5px;
+  line-height: 1.5;
+  font-family: ui-monospace, "SF Mono", Menlo, monospace;
+  white-space: pre;
+}
+.agent-screen[hidden] { display: none; }
+
 .reply-box {
   margin-top: 10px;
   display: flex;
+  flex-wrap: wrap;
   gap: 6px;
 }
 .reply-box[hidden] { display: none; }
+
+/* A failed send (e.g. orca itself rejecting the input) used to look
+   identical to a successful one — the textarea just cleared with no
+   feedback either way. `flex: 1 1 100%` drops this onto its own line
+   below the textarea/button instead of squeezing into the row. */
+.agent-send-error {
+  flex: 1 1 100%;
+  color: #ff6e6e;
+  font-size: 12px;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+.agent-send-error[hidden] { display: none; }
 
 .reply-box textarea {
   flex: 1;
@@ -789,8 +824,18 @@ svg.state-icon {
 }
 
 .modal-body {
+  /* Without an explicit flex-basis, a flex-column child defaults to
+     `min-height: auto` — it never shrinks below its own content size, so
+     it just grows past .modal-sheet's max-height instead of scrolling.
+     `overflow-y: auto` above was a no-op until this constrained it. */
+  flex: 1 1 auto;
+  min-height: 0;
   overflow-y: auto;
   padding-right: 2px;
+  /* Legacy WebKit needs this explicitly for touch-drag scrolling to work
+     at all inside a nested scroll container — without it, dragging here
+     can do nothing rather than just lose inertia. */
+  -webkit-overflow-scrolling: touch;
 }
 
 @media (min-width: 761px) {
