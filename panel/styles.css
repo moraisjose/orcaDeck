@@ -470,9 +470,6 @@ svg.state-icon {
   align-items: center;
   gap: 10px;
   min-width: 0;
-  /* Leaves room for the harness logo floating at the card's top-right
-     corner, so the "primary" chip's right edge doesn't collide with it. */
-  padding-right: 26px;
 }
 
 .dot {
@@ -485,16 +482,6 @@ svg.state-icon {
 .dot.working { background: var(--working); box-shadow: 0 0 0 3px rgba(237, 178, 0, 0.25); }
 .dot.attn { background: var(--amber); box-shadow: 0 0 0 3px rgba(254, 110, 0, 0.25); }
 .dot.done { background: var(--green); box-shadow: 0 0 0 3px rgba(0, 187, 127, 0.25); }
-
-/* Floats in its own corner instead of sitting in the title's reading line —
-   `.card` is the positioned ancestor these coordinates anchor to. */
-.card-logo {
-  position: absolute;
-  top: 14px;
-  right: 16px;
-}
-.card-logo[hidden] { display: none; }
-.card-logo .agent-logo { width: 18px; height: 18px; border-radius: 5px; margin-top: 0; }
 
 .card-title {
   font-weight: 600;
@@ -549,6 +536,18 @@ svg.state-icon {
 }
 
 .card-agent-row .dot { flex: none; }
+
+/* Harness logo, right after the state icon — lives at the agent level now,
+   not floating over the whole card, since a single card can run more than
+   one harness across its agents. */
+.card-agent-row .agent-logo {
+  flex: none;
+  width: 14px;
+  height: 14px;
+  border-radius: 4px;
+  margin-top: 0;
+}
+.card-agent-row .agent-logo.fallback { font-size: 7px; }
 
 .card-agent-text {
   flex: 1;

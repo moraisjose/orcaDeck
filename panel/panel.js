@@ -245,9 +245,6 @@ function buildCard(w) {
   card.tabIndex = 0;
   card.setAttribute("role", "button");
 
-  // Harness logo floats in its own corner, out of the reading line entirely.
-  const logoSlot = el("span", "card-logo");
-
   // State icon reads first, right before the name — its colour is the only
   // state signal left on the card now; no separate state-word line.
   const head = el("div", "card-head");
@@ -260,7 +257,7 @@ function buildCard(w) {
   const sub = el("div", "card-sub");
   const agentsBox = el("div", "card-agents");
 
-  card.append(logoSlot, head, sub, agentsBox);
+  card.append(head, sub, agentsBox);
   card.addEventListener("click", () => openModal(card.dataset.wtid));
   card.addEventListener("keydown", (ev) => {
     if (ev.key === "Enter" || ev.key === " ") {
@@ -313,11 +310,12 @@ function buildCardAgentRow(agent, depth) {
   const row = el("div", "card-agent-row");
   row.style.marginLeft = depth * 14 + "px";
   const dot = stateIconNode(agentStateKind(agent));
+  const logo = harnessLogo(agent.agentType);
   const text = el("span", "card-agent-text");
   text.textContent = agentRowText(agent);
   const age = el("span", "card-agent-age");
   age.textContent = fmtAge(agent.updatedAt || agent.stateStartedAt);
-  row.append(dot, text, age);
+  row.append(dot, logo, text, age);
   return row;
 }
 
@@ -336,25 +334,6 @@ function updateCard(card, w, r) {
 
   setText(card.querySelector(".card-title"), w.displayName || w.repo || w.branch || "worktree");
   card.querySelector(".chip").hidden = !w.isMainWorktree;
-
-  const logoSlot = card.querySelector(".card-logo");
-  const topType = w.agents && w.agents[0] ? w.agents[0].agentType : null;
-  if (topType) {
-    logoSlot.hidden = false;
-    // Only recreate the <img> when the harness actually changes — this is
-    // the same node-reuse discipline as the rest of the diff, so a card
-    // whose agent type is unchanged never re-triggers an image load.
-    if (logoSlot.dataset.type !== topType) {
-      // Element.replaceChildren is Safari 16+ / iPadOS 16+ only — an older
-      // iPad throws here, and since this runs inside poll()'s try/catch it
-      // got mislabeled "unreachable" even though the fetch had succeeded.
-      logoSlot.textContent = "";
-      logoSlot.append(harnessLogo(topType));
-      logoSlot.dataset.type = topType;
-    }
-  } else {
-    logoSlot.hidden = true;
-  }
 
   setText(card.querySelector(".card-sub"), [w.repo, w.branch].filter(Boolean).join(" · "));
 
