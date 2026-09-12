@@ -35,13 +35,6 @@ orcadeck serve
 skill checks prerequisites, starts the server, and hands you the URL to open
 on your other device.
 
-## Use it
-
-`orcadeck serve` prints a local and a LAN URL. Open the **LAN** one in that
-device's browser once — the token pairs it — then bookmark the plain
-`http://<ip>:8720/` from then on, or add it to its Home Screen. Tap **Reply**
-on any session to send text straight into it.
-
 ## Security
 
 `orcad` binds your LAN on purpose — that's how the iPad reaches the panel.
