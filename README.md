@@ -18,7 +18,7 @@ with the ability to reply into a session from there. The panel is built to
 run on legacy WebKit too, all the way back to iOS 10 Safari — that old
 tablet in a drawer can be a dashboard again.
 
-<p align="center"><img src="docs/screenshot.png" alt="orcaDeck panel" width="700">
+<p align="center"><img src="docs/orcadeck-ipad.gif" alt="orcaDeck panel on an old iPad" width="700">
 
 </p>
 
