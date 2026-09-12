@@ -33,6 +33,18 @@ orcadeck serve
 
 **Claude Code** — ask it to set up orcaDeck; the bundled `setup-orcadeck` skill checks prerequisites, starts the server, and hands you the URL to open on your other device.
 
+## Security
+
+`orcad` binds your LAN on purpose — that's how the iPad reaches the panel.
+Anything on the network can read what it serves: the state feed (repo,
+branch, and worktree names, agent prompts, last assistant messages, usage
+readings) and the live terminal tail of a session, which can contain
+whatever that terminal printed. Typing into a session — sending text or an
+interrupt — is the only gated path, behind a token `orcad` generates on
+first run (`~/.orcad/token`, chmod 600, shown once as a pairing URL). So:
+run it on networks you trust — home or office, not the café — or set
+`ORCAD_BIND=127.0.0.1` to keep it same-machine-only.
+
 ## How it works
 
 `orcad` polls `orca worktree ps` + `orca terminal list`, projects them into
@@ -44,3 +56,8 @@ process/port. Full design: [`docs/design.md`](docs/design.md).
 A sibling to [Clawdeck](https://github.com/Dixie-sketch/Clawdeck), same
 "small companion + polling panel" shape, sourced from Orca instead of Claude
 Code's hooks, so it sees every harness Orca runs, not only Claude.
+
+orcaDeck is an independent project and is not affiliated with or endorsed by
+Orca or the harness vendors; *Orca*, *Claude*, *Codex*, and *OpenCode* are
+their respective owners' marks, named here only to say what the panel works
+with.
