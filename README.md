@@ -3,13 +3,8 @@
 </p>
 
 <p align="center">
-
   <a href="LICENSE"><img alt="License: MIT" src="https://img.shields.io/badge/license-MIT-blue.svg"></a>
-
-  <img alt="Python 3.9+" src="https://img.shields.io/badge/python-3.9%2B-blue.svg">
-
   <img alt="Version 0.1.0" src="https://img.shields.io/badge/version-0.1.0-orange.svg">
-
 </p>
 
 A live panel of everything [Orca](https://orcaapp.dev) is running — every
