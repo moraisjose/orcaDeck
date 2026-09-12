@@ -20,6 +20,7 @@ REPO_ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(REPO_ROOT))
 
 from orcad import orcad  # noqa: E402  (namespace-package import needs the path above)
+from orcad import auth, cli  # noqa: E402
 
 
 class BuildTerminalIndexTests(unittest.TestCase):
@@ -235,7 +236,7 @@ class SendTextConfirmedTests(unittest.TestCase):
     def test_reissues_with_retry_request_until_turn_started(self):
         first = {"send": {"prompt": {"requestId": "r1", "stages": ["submitted"]}}}
         confirmed = {"send": {"prompt": {"requestId": "r1", "stages": ["turn_started"]}}}
-        with mock.patch.object(orcad, "run_orca_json", side_effect=[first, confirmed]) as run:
+        with mock.patch.object(cli, "run_orca_json", side_effect=[first, confirmed]) as run:
             out = orcad.send_text_confirmed("orca", "h1", "hello", True)
 
         self.assertIs(out, confirmed)
@@ -251,7 +252,7 @@ class SendTextConfirmedTests(unittest.TestCase):
 
     def test_turn_started_on_first_send_means_no_reissue(self):
         first = {"send": {"prompt": {"requestId": "r1", "stages": ["turn_started"]}}}
-        with mock.patch.object(orcad, "run_orca_json", return_value=first) as run:
+        with mock.patch.object(cli, "run_orca_json", return_value=first) as run:
             out = orcad.send_text_confirmed("orca", "h1", "hello", False)
 
         self.assertIs(out, first)
@@ -265,7 +266,7 @@ class SendTextConfirmedTests(unittest.TestCase):
             error={"data": {"orchestrationRequestId": "r1"}},
         )
         confirmed = {"send": {"prompt": {"requestId": "r1", "stages": ["turn_started"]}}}
-        with mock.patch.object(orcad, "run_orca_json", side_effect=[err, confirmed]) as run:
+        with mock.patch.object(cli, "run_orca_json", side_effect=[err, confirmed]) as run:
             out = orcad.send_text_confirmed("orca", "h1", "hello", True)
 
         self.assertIs(out, confirmed)
@@ -275,7 +276,7 @@ class SendTextConfirmedTests(unittest.TestCase):
 
     def test_cli_error_without_request_id_propagates(self):
         err = orcad.OrcaCliError("boom")
-        with mock.patch.object(orcad, "run_orca_json", side_effect=err) as run:
+        with mock.patch.object(cli, "run_orca_json", side_effect=err) as run:
             with self.assertRaises(orcad.OrcaCliError):
                 orcad.send_text_confirmed("orca", "h1", "hello", True)
         self.assertEqual(run.call_count, 1)
@@ -393,8 +394,8 @@ class LoadOrCreateTokenTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as td:
             state_dir = Path(td) / "state"
             token_path = state_dir / "token"
-            with mock.patch.object(orcad, "STATE_DIR", state_dir), mock.patch.object(
-                orcad, "TOKEN_PATH", token_path
+            with mock.patch.object(auth, "STATE_DIR", state_dir), mock.patch.object(
+                auth, "TOKEN_PATH", token_path
             ):
                 first = orcad.load_or_create_token()
                 self.assertTrue(first)
@@ -409,8 +410,8 @@ class LoadOrCreateTokenTests(unittest.TestCase):
             state_dir = Path(td)
             token_path = state_dir / "token"
             token_path.write_text("\n")
-            with mock.patch.object(orcad, "STATE_DIR", state_dir), mock.patch.object(
-                orcad, "TOKEN_PATH", token_path
+            with mock.patch.object(auth, "STATE_DIR", state_dir), mock.patch.object(
+                auth, "TOKEN_PATH", token_path
             ):
                 token = orcad.load_or_create_token()
                 self.assertTrue(token)
