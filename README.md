@@ -8,7 +8,7 @@
 
   <img alt="Python 3.9+" src="https://img.shields.io/badge/python-3.9%2B-blue.svg">
 
-  <img alt="stdlib only" src="https://img.shields.io/badge/dependencies-none-brightgreen.svg">
+  <img alt="Version 0.1.0" src="https://img.shields.io/badge/version-0.1.0-orange.svg">
 
 </p>
 
@@ -34,13 +34,9 @@ curl -fsSL https://raw.githubusercontent.com/moraisjose/orcaDeck/main/install.sh
 orcadeck serve
 ```
 
-
-
 **Agent**
 
-**Claude Code** — ask it to set up orcaDeck; the bundled `setup-orcadeck`  
-skill checks prerequisites, starts the server, and hands you the URL to open  
-on your other device.
+**Claude Code** — ask it to set up orcaDeck; the bundled `setup-orcadeck` skill checks prerequisites, starts the server, and hands you the URL to open on your other device.
 
 ## How it works
 

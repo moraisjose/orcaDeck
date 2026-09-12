@@ -245,24 +245,22 @@ function buildCard(w) {
   card.tabIndex = 0;
   card.setAttribute("role", "button");
 
-  // The state is the first thing on the card, bold and in its own colour —
-  // the thing a glance across the grid should read first, before the name.
-  const state = el("div", "card-state");
-  const stateIconSlot = el("span", "card-state-icon");
-  const stateText = el("span", "card-state-text");
-  state.append(stateIconSlot, stateText);
-
-  const head = el("div", "card-head");
+  // Harness logo floats in its own corner, out of the reading line entirely.
   const logoSlot = el("span", "card-logo");
+
+  // State icon reads first, right before the name — its colour is the only
+  // state signal left on the card now; no separate state-word line.
+  const head = el("div", "card-head");
+  const stateIconSlot = el("span", "card-state-icon");
   const title = el("div", "card-title");
   const chip = el("span", "chip");
   chip.textContent = "primary";
-  head.append(logoSlot, title, chip);
+  head.append(stateIconSlot, title, chip);
 
   const sub = el("div", "card-sub");
   const agentsBox = el("div", "card-agents");
 
-  card.append(state, head, sub, agentsBox);
+  card.append(logoSlot, head, sub, agentsBox);
   card.addEventListener("click", () => openModal(card.dataset.wtid));
   card.addEventListener("keydown", (ev) => {
     if (ev.key === "Enter" || ev.key === " ") {
@@ -327,11 +325,9 @@ function updateCard(card, w, r) {
   card.dataset.wtid = w.worktreeId;
   card.className = "card" + (r.band === 0 ? " attn" : r.band === 1 ? " working" : "");
 
-  const stateEl = card.querySelector(".card-state");
   const kind = stateClass(r);
-  stateEl.className = "card-state " + kind;
-  setText(stateEl.querySelector(".card-state-text"), r.label);
-  const iconSlot = stateEl.querySelector(".card-state-icon");
+  const iconSlot = card.querySelector(".card-state-icon");
+  iconSlot.className = "card-state-icon " + kind;
   if (iconSlot.dataset.kind !== kind) {
     iconSlot.textContent = "";
     iconSlot.append(stateIconNode(kind));
