@@ -7,7 +7,7 @@
   <img alt="Version 0.1.0" src="https://img.shields.io/badge/version-0.1.0-orange.svg">
 </p>
 
-A live panel of everything [Orca](https://orcaapp.dev) is running — every
+A live panel of everything [Orca](https://www.onorca.dev) is running — every
 worktree, agent, subagent, and harness — servable to any device on your LAN,
 with the ability to reply into a session from there. The panel is built to
 run on legacy WebKit too, all the way back to iOS 10 Safari — that old
@@ -19,7 +19,7 @@ tablet in a drawer can be a dashboard again.
 
 ## Install and Usage
 
-You need [Orca](https://orcaapp.dev) installed (`orca` on PATH) and Python
+You need [Orca](https://www.onorca.dev) installed (`orca` on PATH) and Python
 3.9+ — no other dependencies.
 
 **CLI**
