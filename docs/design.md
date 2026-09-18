@@ -42,6 +42,32 @@ orca CLI (worktree ps, terminal list, account list) ──poll──▶ orcad (0
                                                           panel in iPad Safari (polls every 2s)
 ```
 
+## Browser baseline
+
+The panel targets **legacy WebKit, back to iOS 10 Safari** — that is the point
+of the project, not a nice-to-have, and the device it is aimed at is the old
+iPad someone still has in a drawer. The trap is that legacy WebKit fails
+*silently*: it does not throw on a construct it doesn't understand, it drops
+the declaration or never fires the event. The panel on the desk keeps working,
+nothing reaches a console anyone is reading, and the break is only ever found
+by a human standing in front of the old tablet.
+
+That has happened three times, twice in code that also carried a comment
+warning about it, so the rules are enforced by `tests/legacy_webkit.test.js`
+rather than trusted to reviewers:
+
+| avoid | available from | what breaks |
+| --- | --- | --- |
+| `var()` inside `@keyframes` | Safari 16 | the whole keyframe is dropped; the animation silently does nothing |
+| `inset:` shorthand | Safari 14.1 | offsets fall back to auto; absolutely-positioned overlays land in the wrong place |
+| flexbox `gap` | Safari 14.1 | spacing collapses — hence the `@supports not (gap: 1px)` block |
+| Pointer Events | Safari 13 | a `pointerdown` listener is registered against an event that never fires |
+| `?.` and `??` | Safari 13.1 | a syntax error, which takes down the entire script |
+| `:is()` / `:where()` | Safari 14 | the whole selector is dropped |
+
+Where a modern feature genuinely earns its place, feature-detect it and write
+the fallback — `wirePet()` in `panel.js` is the worked example.
+
 ## Data projection
 
 `orca worktree ps --json` already returns almost the exact shape the sidebar

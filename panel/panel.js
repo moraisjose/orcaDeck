@@ -853,29 +853,65 @@ const PET_MS = 620;
 
 function triggerMascotPet(root, ev) {
   const front = root.querySelector(".orca-front");
-  root.style.setProperty("--dir", String(petDirection(root, ev)));
+  // A class per side, not a --dir custom property: custom properties inside
+  // @keyframes only started working in Safari 16, and this panel's baseline
+  // is iOS 10 Safari. On older WebKit the whole keyframe is dropped, so the
+  // lean and the heart silently do nothing while the eyes still change.
+  const side = petDirection(root, ev) < 0 ? "pet-left" : "pet-right";
 
   // Forced reflow between the removal and the re-add: without it the browser
   // coalesces both into one frame, sees no change, and lets the in-flight
   // animation run on — so a rapid second tap would do nothing at all.
-  root.classList.remove("petted");
-  if (front) front.classList.remove("petted");
+  for (const node of [root, front]) {
+    if (!node) continue;
+    node.classList.remove("petted");
+    node.classList.remove("pet-left");
+    node.classList.remove("pet-right");
+  }
   void root.offsetWidth;
-  root.classList.add("petted");
-  if (front) front.classList.add("petted");
+  for (const node of [root, front]) {
+    if (!node) continue;
+    node.classList.add("petted");
+    node.classList.add(side);
+  }
 
   clearTimeout(root._petTimer);
   root._petTimer = setTimeout(() => {
-    root.classList.remove("petted");
-    if (front) front.classList.remove("petted");
+    for (const node of [root, front]) {
+      if (!node) continue;
+      node.classList.remove("petted");
+      node.classList.remove("pet-left");
+      node.classList.remove("pet-right");
+    }
   }, PET_MS);
 }
 
-// pointerdown, not click: it lands on finger-down instead of waiting for the
-// lift, which is the difference between a toy that answers and one that
-// lags. One handler covers mouse, touch and pen.
+// Press-time, not click-time: the reaction should land on finger-down rather
+// than wait for the lift. One pointerdown handler covers mouse, touch and pen
+// — but ONLY where Pointer Events exist, which is Safari 13 and later.
+//
+// This panel's baseline is iOS 10 Safari (see the README: "that old tablet in
+// a drawer can be a dashboard again"), and on an iPad older than iOS 13 a
+// pointerdown listener is registered against an event the engine never fires.
+// Nothing throws and nothing logs; petting is simply inert. That is exactly
+// how this shipped broken, so the fallback is not hypothetical.
 function wirePet(root) {
-  root.addEventListener("pointerdown", (ev) => triggerMascotPet(root, ev));
+  if (window.PointerEvent) {
+    root.addEventListener("pointerdown", (ev) => triggerMascotPet(root, ev));
+    return;
+  }
+  // Legacy WebKit. touchstart is the press-time event; mousedown covers a
+  // mouse on an old desktop engine. iOS synthesises mouse events after every
+  // touch, so the pair alone would fire twice per tap and restart the
+  // animation mid-flight — the timestamp is the ordinary ghost-click guard.
+  let lastTouchAt = 0;
+  root.addEventListener("touchstart", (ev) => {
+    lastTouchAt = Date.now();
+    triggerMascotPet(root, ev.touches && ev.touches[0]);
+  });
+  root.addEventListener("mousedown", (ev) => {
+    if (Date.now() - lastTouchAt > 700) triggerMascotPet(root, ev);
+  });
 }
 
 function triggerMascotBounce(root) {
