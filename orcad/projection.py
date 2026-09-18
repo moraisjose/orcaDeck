@@ -46,13 +46,15 @@ def _nest_agents(raw_agents: list[dict], term_index: dict[str, dict]) -> list[di
             "parentPaneKey": a.get("parentPaneKey"),
             "agentType": a.get("agentType"),
             "state": a.get("state"),
-            # `state: "working"` alone is not enough to mean "actually
-            # working" — Orca's own UI (checked against its bundled source,
-            # terminal-tab-activity-status.js) treats `workingMode:
-            # "monitoring"` as a distinct, separate case: the agent finished
-            # its turn and is idling/waiting, not crunching. Dropping this
-            # field is what let a session asking the user a question render
-            # as "Working" instead of "Needs attention".
+            # `state: "working"` alone is not enough to say WHAT kind of
+            # work: Orca's own UI treats `workingMode: "monitoring"` as its
+            # own case, and its label for it is "Monitoring background
+            # tasks". Per claude-roster-state.js it is minted only when the
+            # lead turn is already done and a background shell task or a
+            # session cron is still running — so the panel shows it as busy,
+            # distinct from a turn actually being driven, and never as a
+            # session asking for a human. That misreading is what used to pin
+            # every session with a background task in "Needs attention".
             "workingMode": a.get("workingMode"),
             "displayName": a.get("displayName"),
             "taskTitle": a.get("taskTitle"),

@@ -106,7 +106,7 @@
         <div class="mock-mood-preview" data-mood="working"></div>
         <div class="mock-mood-info">
           <h2><span class="state-icon spin-ring"></span>Working</h2>
-          <p><strong>Trigger:</strong> at least one session's agent is actively working, and nothing anywhere needs attention (working never outranks attention).</p>
+          <p><strong>Trigger:</strong> at least one session is busy — actively working, or only monitoring a background task — and nothing anywhere needs attention (working never outranks attention).</p>
           <p><strong>Looks like:</strong> eyes open, a continuous gentle bob, the side fins flap and the tail tabs wiggle.</p>
           <p><strong>Duration:</strong> continuous — lasts exactly as long as at least one session is working.</p>
         </div>
@@ -116,7 +116,8 @@
         <div class="mock-mood-preview" data-mood="attn"></div>
         <div class="mock-mood-info">
           <h2><span class="icon-chat"></span>Needs attention</h2>
-          <p><strong>Trigger (highest priority — outranks everything else):</strong> at least one session's agent genuinely needs a human — a needs-input/waiting/blocked state, <code>state:"working"</code> with <code>workingMode:"monitoring"</code> (it finished its turn and is idling, most often waiting on a reply), or <code>interrupted:true</code>. Also triggers if orcad itself becomes unreachable or errors <em>after</em> data had already loaded once — that's something to go check too.</p>
+          <p><strong>Trigger (highest priority — outranks everything else):</strong> at least one session's agent genuinely needs a human, which is exactly Orca's own <code>permission</code> status and nothing else: <code>state:"blocked"</code> or <code>state:"waiting"</code>. Also triggers if orcad itself becomes unreachable or errors <em>after</em> data had already loaded once — that's something to go check too.</p>
+          <p class="mock-note"><strong>Not</strong> this: <code>workingMode:"monitoring"</code> counts as working (Orca mints it when the turn is <em>done</em> but a background task or session cron is still running — its own label is "Monitoring background tasks"), and <code>interrupted:true</code> counts as finished (someone pressed Ctrl+C). Reading either as attention is what used to pin the whole deck here permanently, which in turn meant the Bounce below could never fire.</p>
           <p><strong>Looks like:</strong> eyes narrow and worried, a continuous small side-to-side shiver.</p>
           <p><strong>Duration:</strong> continuous — holds until every such session is resolved (answered, or orcad reconnects).</p>
         </div>
@@ -136,9 +137,9 @@
         <div class="mock-mood-preview" data-mood="done" data-bounce-target></div>
         <div class="mock-mood-info">
           <h2>Bounce (one-shot, on top of Done)</h2>
-          <p><strong>Trigger:</strong> the exact instant the mood transitions from Working straight to Done — i.e. the last actively-working session anywhere just finished with nothing left waiting.</p>
+          <p><strong>Trigger:</strong> the exact instant <em>any one session</em> lands on Done — tracked per worktree, not deck-wide. It is an event, not a mood: a session finishing while three others still need attention still hops, then settles straight back into the worried pose. A session that was interrupted with Ctrl+C doesn't count as finishing, and neither does a session first seen already Done (nobody watched that happen).</p>
           <p><strong>Looks like:</strong> two quick whole-body hops.</p>
-          <p><strong>Duration:</strong> ~800ms one-shot, then it settles back into the ordinary Done pose. It cannot repeat mid-flight — it only ever fires again on the next working→done transition.</p>
+          <p><strong>Duration:</strong> ~800ms one-shot, on top of whatever mood is showing. It cannot repeat mid-flight, and a session that stays Done doesn't re-fire — only the next session to finish does.</p>
           <button type="button" id="mock-bounce-btn" class="chip-btn">Play it</button>
         </div>
       </section>
@@ -150,9 +151,21 @@
           <li>Never successfully loaded any data yet → <strong>Idle</strong></li>
           <li>orcad unreachable / a render error, <em>after</em> data had already loaded once → <strong>Needs attention</strong></li>
           <li>Any session needs attention right now → <strong>Needs attention</strong></li>
-          <li>Any session is actively working → <strong>Working</strong></li>
+          <li>Any session is working or monitoring → <strong>Working</strong></li>
           <li>Zero agents running anywhere at all → <strong>Idle</strong></li>
           <li>Otherwise (only finished sessions) → <strong>Done</strong></li>
+        </ol>
+        <p>The Bounce is deliberately <em>not</em> on this ladder — it's a one-shot event fired per worktree, so it still plays while the mascot is showing any other mood.</p>
+
+        <h2>Per-session statuses</h2>
+        <p>Cards and agent rows use Orca's own status ladder rather than the four moods above, in Orca's own order — read out of its <code>worktree-status.js</code>:</p>
+        <ol>
+          <li><strong>Needs attention</strong> — <code>state:"blocked"</code> / <code>"waiting"</code></li>
+          <li><strong>Working</strong> — <code>state:"working"</code></li>
+          <li><strong>Monitoring</strong> — <code>state:"working"</code> + <code>workingMode:"monitoring"</code>: turn done, background task or cron still running</li>
+          <li><strong>Interrupted</strong> — <code>state:"done"</code> + <code>interrupted:true</code>: a human pressed Ctrl+C</li>
+          <li><strong>Done</strong> — <code>state:"done"</code></li>
+          <li><strong>No recent update</strong> — any non-done status older than 30 minutes, matching Orca's own <code>AGENT_STATUS_STALE_AFTER_MS</code> decay, so a pane whose hook stream died stops claiming to be live work</li>
         </ol>
       </section>
     </div>

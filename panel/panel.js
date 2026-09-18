@@ -30,25 +30,76 @@ const LOGO_BY_TYPE = {
   minimax: "/assets/harness/minimax.svg",
 };
 
-const ATTENTION_STATES = new Set(["needs_input", "attention", "waiting", "blocked"]);
-
-// The single source of truth for "does this agent need a human" — every
-// place that used to check ATTENTION_STATES.has(agent.state) alone now goes
-// through this, so the rule can never drift between the rollup, the dot, and
-// the modal's per-agent label.
+// Orca's own status vocabulary, in Orca's own priority order — reproduced,
+// not reinvented. The ladder is worktree-status.js's: permission > working >
+// monitoring > interrupted > done. Everything in this file that classifies an
+// agent goes through agentStatus(), so the rule can never drift between the
+// rollup, the card icon, the mascot and the modal's per-agent line.
 //
-// A raw `state: "working"` is NOT sufficient evidence of active work: Orca's
-// own UI (verified against its bundled terminal-tab-activity-status.js)
-// treats `workingMode: "monitoring"` as its own case — the agent finished
-// its turn and is idling, most often because it just asked a question and
-// is waiting on a reply. `interrupted` is folded in for the same reason: an
-// interrupted run is something a human should look at, not something
-// quietly counted as "working".
-function isAttention(agent) {
-  if (ATTENTION_STATES.has(agent.state)) return true;
-  if (agent.state === "working" && agent.workingMode === "monitoring") return true;
-  if (agent.interrupted === true) return true;
-  return false;
+// `state` itself is only ever one of four values (AGENT_STATUS_STATES in
+// Orca's agent-status-types.js): working, blocked, waiting, done. The two
+// derived statuses are the ones worth spelling out, because guessing at them
+// is exactly what this file used to get wrong:
+//
+//   monitoring — `state:"working"` + `workingMode:"monitoring"`. NOT "the
+//     agent asked a question and is waiting on a reply". Orca mints it in
+//     claude-roster-state.js only when the lead turn is ALREADY done and a
+//     background shell task or a session cron is still running; its own label
+//     is "Monitoring background tasks", and terminal-tab-activity-status.js
+//     groups it with working/permission as busy. Reading it as attention
+//     pinned every session with a background task in "Needs attention" for
+//     good — and since the mascot's Done bounce was gated on nothing needing
+//     attention anywhere, it also meant that animation could never fire.
+//
+//   unverifiable — a non-done status too old to believe. Orca decays these
+//     after AGENT_STATUS_STALE_AFTER_MS (agent-status-freshness.js) so a pane
+//     whose hook stream died stops counting as live work; its dot calls that
+//     "No recent update". Without the same gate here a dead pane claims to be
+//     working for as long as orcad keeps polling.
+//
+// "Needs attention" is exactly Orca's `permission`, and nothing else: state
+// blocked or waiting. `interrupted` is its own rung, below monitoring — it
+// only ever rides `state:"done"` carrying `is_interrupt` from Claude's Stop
+// hook (claude-events.js), i.e. a human pressed Esc/Ctrl+C. A run the human
+// ended on purpose is not a run asking for their attention.
+const STALE_AFTER_MS = 30 * 60 * 1000;
+
+const STATUS_RANK = {
+  permission: 0,
+  working: 1,
+  monitoring: 2,
+  interrupted: 3,
+  done: 4,
+  unverifiable: 5,
+  idle: 5,
+};
+
+const STATUS_LABEL = {
+  permission: "Needs attention",
+  working: "Working",
+  monitoring: "Monitoring",
+  interrupted: "Interrupted",
+  done: "Done",
+  unverifiable: "No recent update",
+  idle: "Idle",
+};
+
+// Band -> the status that put a worktree in it. Bands 5 is shared by idle and
+// unverifiable (Orca treats a decayed pane as contributing nothing either),
+// so the rollup resolves that one from the counts instead.
+const BAND_STATUS = ["permission", "working", "monitoring", "interrupted", "done", "idle"];
+
+function agentStatus(agent, now) {
+  const state = agent.state;
+  // done is never stale-gated — a finished turn stays finished however long
+  // ago it finished, which is why Orca's freshness check is explicitly
+  // "isFreshNonDoneAgentStatus".
+  if (state === "done") return agent.interrupted === true ? "interrupted" : "done";
+  if (state !== "working" && state !== "blocked" && state !== "waiting") return "idle";
+  const seenAt = agent.updatedAt || agent.stateStartedAt || 0;
+  if (!seenAt || (now || Date.now()) - seenAt > STALE_AFTER_MS) return "unverifiable";
+  if (state === "working") return agent.workingMode === "monitoring" ? "monitoring" : "working";
+  return "permission";
 }
 
 const FILTER_MODES = ["all", "working", "attention", "done"];
@@ -71,7 +122,9 @@ function getToken() {
   return localStorage.getItem(TOKEN_KEY);
 }
 
-let TOKEN = getToken();
+// Read in boot(), not here: this file has to be requirable outside a browser
+// (see the bottom of the file) and getToken() reaches for window/localStorage.
+let TOKEN = null;
 
 function fmtAge(ms) {
   if (!ms) return "";
@@ -126,48 +179,41 @@ function rollup(w) {
   // means "has a live/attached terminal" (the same green dot Orca's own UI
   // shows for a long-finished session), not "an agent is working right now".
   // Only a specific agent's state counts as evidence of work in progress.
-  let attn = false;
-  let working = false;
-  let workingCount = 0;
-  let attnCount = 0;
-
+  //
+  // The band IS the worktree's position on Orca's ladder: the best (lowest)
+  // rank any of its agents holds. One shared ladder means the card icon, the
+  // sort order and the filter chips can't disagree about what a session is.
+  const now = Date.now();
+  const counts = {};
+  let band = STATUS_RANK.idle;
   for (const a of agents) {
-    if (isAttention(a)) {
-      attn = true;
-      attnCount++;
-    } else if (a.state === "working") {
-      working = true;
-      workingCount++;
-    }
+    const s = agentStatus(a, now);
+    counts[s] = (counts[s] || 0) + 1;
+    if (STATUS_RANK[s] < band) band = STATUS_RANK[s];
   }
 
-  // Four distinct bands now, not three — idle used to share band 2 with
-  // Done (only the label differed); it's its own lowest-priority band so the
-  // sort order is exactly needs attention, working, done, idle.
-  let band;
+  let status = agents.length ? BAND_STATUS[band] : "idle";
+  if (band === STATUS_RANK.idle && counts.unverifiable) status = "unverifiable";
+
+  const n = counts[status] || 0;
   let label;
-  if (attn) {
-    band = 0;
-    label = attnCount > 1 ? `${attnCount} need attention` : "Needs attention";
-  } else if (working) {
-    band = 1;
-    label = workingCount > 1 ? `${workingCount} working` : "Working";
-  } else if (agents.length) {
-    band = 2;
-    label = "Done";
-  } else {
-    band = 3;
-    label = "Idle";
-  }
+  if (!agents.length) label = "Idle";
+  else if (band === 0) label = n > 1 ? `${n} need attention` : "Needs attention";
+  else if (band === 1) label = n > 1 ? `${n} working` : "Working";
+  else if (band === 2) label = n > 1 ? `${n} monitoring` : "Monitoring background tasks";
+  else label = STATUS_LABEL[status];
 
-  return { band, label, agentCount: agents.length };
+  return { band, status, label, agentCount: agents.length };
 }
 
+// Six bands, three chips: the chips group them the way Orca groups its own
+// statuses — working and monitoring are both "busy", done and interrupted are
+// both "finished" — so no band is left unreachable behind every chip.
 function matchesFilter(band, mode) {
   if (mode === "all") return true;
-  if (mode === "working") return band === 1;
   if (mode === "attention") return band === 0;
-  if (mode === "done") return band === 2;
+  if (mode === "working") return band === 1 || band === 2;
+  if (mode === "done") return band === 3 || band === 4;
   return true;
 }
 
@@ -188,9 +234,10 @@ function sortedWorktrees(worktrees) {
 
 // ---------------------------------------------------------------- state icons
 
-// The exact three icons Orca's own AgentStateDot component uses (read out of
-// its bundled source): a CSS spinner ring for working, Lucide's
-// message-circle-question-mark for needs attention, circle-check for done.
+// The exact icons Orca's own AgentStateDot component uses (read out of its
+// bundled source): a CSS spinner ring for working, Lucide's
+// message-circle-question-mark for needs attention, circle-check for done,
+// activity for monitoring, circle-dashed for a status too old to verify.
 // Reproduced as real elements/paths, not re-drawn, so they read as the same
 // status language a viewer already knows from Orca itself.
 const SVG_NS = "http://www.w3.org/2000/svg";
@@ -222,22 +269,46 @@ function checkIcon() {
   ]);
 }
 
-// kind: "working" | "attn" | "done" | anything else (idle/unknown -> a plain
-// neutral dot, matching Orca's own dot for idle/unverifiable states).
+// Lucide `activity` — the pulse line Orca shows for a pane that is only
+// monitoring background tasks, deliberately not the working spinner.
+function activityIcon() {
+  return svgIcon("icon-activity", [
+    ["path", { d: "M22 12h-2.48a2 2 0 0 0-1.93 1.46l-2.35 8.36a.25.25 0 0 1-.48 0L9.24 2.18a.25.25 0 0 0-.48 0l-2.35 8.36A2 2 0 0 1 4.49 12H2" }],
+  ]);
+}
+
+// Lucide `circle-dashed` — Orca's own mark for "No recent update".
+function dashedIcon() {
+  return svgIcon("icon-dashed", [
+    ["path", { d: "M10.1 2.182a10 10 0 0 1 3.8 0" }],
+    ["path", { d: "M13.9 21.818a10 10 0 0 1-3.8 0" }],
+    ["path", { d: "M17.609 3.721a10 10 0 0 1 2.69 2.7" }],
+    ["path", { d: "M2.182 13.9a10 10 0 0 1 0-3.8" }],
+    ["path", { d: "M20.279 17.609a10 10 0 0 1-2.7 2.69" }],
+    ["path", { d: "M21.818 10.1a10 10 0 0 1 0 3.8" }],
+    ["path", { d: "M3.721 6.391a10 10 0 0 1 2.7-2.69" }],
+    ["path", { d: "M6.391 20.279a10 10 0 0 1-2.69-2.7" }],
+  ]);
+}
+
+// Takes one of agentStatus()'s values. The mascot passes its own mood names,
+// which are a near-subset — "attn" is its spelling of permission.
 function stateIconNode(kind) {
   if (kind === "working") return el("span", "state-icon spin-ring");
-  if (kind === "attn") return chatIcon();
+  if (kind === "monitoring") return activityIcon();
+  if (kind === "permission" || kind === "attn") return chatIcon();
   if (kind === "done") return checkIcon();
+  if (kind === "unverifiable") return dashedIcon();
+  if (kind === "interrupted") return el("span", "state-icon dot-interrupted");
   return el("span", "state-icon dot-plain");
 }
 
 // ------------------------------------------------------------------- cards
 
+// The rollup already resolved which status put this worktree in its band;
+// that name is both the icon to draw and the class that colours it.
 function stateClass(r) {
-  if (r.band === 0) return "attn";
-  if (r.band === 1) return "working";
-  if (r.band === 2) return "done";
-  return "idle";
+  return r.status;
 }
 
 function buildCard(w) {
@@ -270,10 +341,7 @@ function buildCard(w) {
 }
 
 function agentStateKind(agent) {
-  if (isAttention(agent)) return "attn";
-  if (agent.state === "working") return "working";
-  if (agent.state === "done") return "done";
-  return "idle";
+  return agentStatus(agent);
 }
 
 // The line a subagent row shows: whatever's most specific about what it's
@@ -321,7 +389,7 @@ function buildCardAgentRow(agent, depth) {
 
 function updateCard(card, w, r) {
   card.dataset.wtid = w.worktreeId;
-  card.className = "card" + (r.band === 0 ? " attn" : r.band === 1 ? " working" : "");
+  card.className = "card" + (r.band === 0 ? " attn" : r.band <= 2 ? " working" : "");
 
   const kind = stateClass(r);
   const iconSlot = card.querySelector(".card-state-icon");
@@ -513,9 +581,9 @@ function updateAgentRow(row, agent, depth) {
   row._agent = agent; // the Send button's onclick reads this, never a stale closure
   row.dataset.depth = String(Math.min(depth, 3));
 
-  const attn = isAttention(agent);
-  row._stateLine.className = "agent-state" + (attn ? " attn" : agent.state === "done" ? " done" : agent.state === "working" ? " working" : "");
-  setText(row._kw, attn ? "Needs input" : agent.state === "working" ? "Working" : agent.state === "done" ? "Done" : (agent.state || "—"));
+  const status = agentStatus(agent);
+  row._stateLine.className = "agent-state " + status;
+  setText(row._kw, STATUS_LABEL[status] || agent.state || "—");
   setText(row._extra, agentRowExtraText(agent));
   setText(row._age, fmtAge(agent.updatedAt || agent.stateStartedAt));
 
@@ -706,7 +774,7 @@ function computeMood(doc) {
     const r = rollup(w);
     total += r.agentCount;
     if (r.band === 0) attn++;
-    else if (r.band === 1) working++;
+    else if (r.band === 1 || r.band === 2) working++;
   }
   if (attn > 0) return "attn";
   if (working > 0) return "working";
@@ -714,7 +782,36 @@ function computeMood(doc) {
   return "done";
 }
 
-let prevMood = null;
+// Per-worktree band, remembered across polls. The Done hop is a one-shot
+// EVENT — "that session just finished" — while the mood above is a continuous
+// aggregate over the whole deck. Deriving the event from the aggregate (the
+// old `prevMood === "working" && mood === "done"`) meant a single session
+// needing attention anywhere suppressed every celebration on the deck; with
+// monitoring miscounted as attention, that suppression was permanent and the
+// animation could never fire at all. They are separate signals now.
+const prevBandByWorktree = new Map();
+
+// Band 4 (done) only: band 3 is interrupted, and a run a human killed with
+// Ctrl+C is not an accomplishment to hop about. A worktree with no remembered
+// band is one this panel never watched change — first poll, or a session that
+// showed up already finished — and neither is a transition, so neither hops.
+function consumeFinishedWorktrees(worktrees) {
+  let finished = false;
+  const seen = new Set();
+  for (const w of worktrees || []) {
+    const id = w.worktreeId;
+    if (!id) continue;
+    seen.add(id);
+    const band = rollup(w).band;
+    const prev = prevBandByWorktree.get(id);
+    if (prev !== undefined && prev <= 2 && band === 4) finished = true;
+    prevBandByWorktree.set(id, band);
+  }
+  for (const id of Array.from(prevBandByWorktree.keys())) {
+    if (!seen.has(id)) prevBandByWorktree.delete(id);
+  }
+  return finished;
+}
 
 // Shared between the real hero mascot and every ?mock=puppy preview (which
 // clones the whole .mascot-wrap) — scoped by class/data-role rather than id,
@@ -731,11 +828,10 @@ function setMascotMood(root, mood) {
   populateOrcaChat(root);
 }
 
-// The one-shot hop + splash: the exact trigger the crab uses — a working
-// mood just landed on "nothing working or waiting", i.e. the last session
-// finished. Both live on a timer rather than an animationend listener so a
-// second trigger mid-flight (rare, but the mock page's button allows it)
-// cleanly restarts rather than leaving stale classes.
+// The one-shot hop + splash. Both live on a timer rather than an
+// animationend listener so a second trigger mid-flight cleanly restarts
+// rather than leaving stale classes — which is no longer rare now that any
+// session finishing fires it, not just the last one on the whole deck.
 function triggerMascotBounce(root) {
   const front = root.querySelector(".orca-front");
   root.classList.add("bounce");
@@ -749,8 +845,14 @@ function triggerMascotBounce(root) {
 function updateMascot(doc) {
   const wrap = document.getElementById("mascot-wrap");
   const mood = computeMood(doc);
-  if (prevMood === "working" && mood === "done") triggerMascotBounce(wrap);
-  prevMood = mood;
+
+  // The hop rides on top of whatever mood is showing; it does not wait for
+  // the mascot to land on Done. A session finishing while three others still
+  // need attention is still a session finishing — it hops once and settles
+  // straight back into the worried pose. Skipped entirely while the feed is
+  // erroring: those worktrees are the last good snapshot, not news.
+  if (!doc.error && consumeFinishedWorktrees(doc.worktrees)) triggerMascotBounce(wrap);
+
   setMascotMood(wrap, mood);
 
   // The mascot itself is fixed white now — this is where the aggregate mood's
@@ -847,16 +949,18 @@ async function poll() {
   }
 }
 
-document.getElementById("filter-chip").addEventListener("click", (ev) => {
-  const idx = FILTER_MODES.indexOf(filterMode);
-  filterMode = FILTER_MODES[(idx + 1) % FILTER_MODES.length];
-  ev.target.textContent = FILTER_LABELS[filterMode];
-  ev.target.dataset.filter = filterMode;
-  if (lastGoodDoc) renderCards(lastGoodDoc.worktrees || []);
-});
+function wireControls() {
+  document.getElementById("filter-chip").addEventListener("click", (ev) => {
+    const idx = FILTER_MODES.indexOf(filterMode);
+    filterMode = FILTER_MODES[(idx + 1) % FILTER_MODES.length];
+    ev.target.textContent = FILTER_LABELS[filterMode];
+    ev.target.dataset.filter = filterMode;
+    if (lastGoodDoc) renderCards(lastGoodDoc.worktrees || []);
+  });
 
-document.getElementById("modal-close").addEventListener("click", closeModal);
-document.getElementById("modal-backdrop").addEventListener("click", closeModal);
+  document.getElementById("modal-close").addEventListener("click", closeModal);
+  document.getElementById("modal-backdrop").addEventListener("click", closeModal);
+}
 
 // ------------------------------------------------------------- ?mock=puppy
 
@@ -958,7 +1062,7 @@ function fakePanelDoc() {
     worktrees: [
       wt({
         repo: "api-gateway", displayName: "Rate limit bug", branch: "refs/heads/fix/rate-limit-bug",
-        agents: [agent({ state: "working", workingMode: "monitoring", prompt: "any update?", lastAssistantMessage: "Found it — the retry loop doesn't back off. Want me to add jittered backoff or just cap the retries?", stateStartedAt: ago(90000), updatedAt: ago(20000) })],
+        agents: [agent({ state: "waiting", prompt: "any update?", lastAssistantMessage: "Found it — the retry loop doesn't back off. Want me to add jittered backoff or just cap the retries?", stateStartedAt: ago(90000), updatedAt: ago(20000) })],
       }),
       wt({
         repo: "checkout-flow", displayName: "Add Apple Pay", branch: "refs/heads/feat/apple-pay",
@@ -966,7 +1070,7 @@ function fakePanelDoc() {
       }),
       wt({
         repo: "docs-site", displayName: "Rewrite quickstart", branch: "refs/heads/docs/quickstart",
-        agents: [agent({ state: "working", agentType: "opencode", toolName: "Write", toolInput: "docs/quickstart.md", updatedAt: ago(8000) })],
+        agents: [agent({ state: "working", workingMode: "monitoring", agentType: "opencode", toolName: "Bash", toolInput: "mkdocs serve", updatedAt: ago(8000) })],
       }),
       wt({
         repo: "billing-service", displayName: "Fix invoice rounding", branch: "refs/heads/fix/invoice-rounding",
@@ -999,18 +1103,48 @@ function initPanelMock() {
   setInterval(tickClock, 1000);
 }
 
-const mockMode = new URLSearchParams(window.location.search).get("mock");
-if (mockMode === "puppy") {
-  initPuppyMock();
-} else if (mockMode === "panel") {
-  initPanelMock();
-} else {
-  poll();
-  setInterval(poll, POLL_MS);
+// --------------------------------------------------------------------- boot
 
-  // The clock ticks at 1 Hz on its own, independent of the 2s data poll — a
-  // clock that only moved when orcad answered would stutter and lag behind
-  // real time, same reasoning as Clawdeck's own 1 Hz tick() (sidecrab.js).
-  tickClock();
-  setInterval(tickClock, 1000);
+// The only code in this file that touches the document at load time. Keeping
+// it behind a `document` check is what lets tests/panel_status.test.js
+// require this file in plain node and exercise the status ladder directly —
+// no build step, and no second copy of the rules to drift out of sync with
+// the one the panel actually runs.
+function boot() {
+  TOKEN = getToken();
+  wireControls();
+
+  const mockMode = new URLSearchParams(window.location.search).get("mock");
+  if (mockMode === "puppy") {
+    initPuppyMock();
+  } else if (mockMode === "panel") {
+    initPanelMock();
+  } else {
+    poll();
+    setInterval(poll, POLL_MS);
+
+    // The clock ticks at 1 Hz on its own, independent of the 2s data poll — a
+    // clock that only moved when orcad answered would stutter and lag behind
+    // real time, same reasoning as Clawdeck's own 1 Hz tick() (sidecrab.js).
+    tickClock();
+    setInterval(tickClock, 1000);
+  }
+}
+
+if (typeof document !== "undefined") boot();
+
+// `module` exists under node and nowhere in a browser, so this is inert when
+// index.html loads the file as a plain <script>.
+if (typeof module !== "undefined") {
+  module.exports = {
+    STALE_AFTER_MS,
+    STATUS_RANK,
+    STATUS_LABEL,
+    agentStatus,
+    rollup,
+    matchesFilter,
+    computeMood,
+    consumeFinishedWorktrees,
+    prevBandByWorktree,
+  };
 }

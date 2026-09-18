@@ -243,13 +243,24 @@ svg.state-icon {
 }
 .icon-chat { color: var(--amber); }
 .icon-check { color: var(--green); }
+/* Monitoring shares working's yellow in Orca too — it IS busy, just busy
+   watching a background task rather than driving a turn; the pulse-line shape
+   is what tells the two apart. "No recent update" gets no colour at all: the
+   dashed ring already says "we can't vouch for this", and giving it a warning
+   hue would compete with the one state that genuinely wants the eye. */
+.icon-activity { color: var(--working); }
+.icon-dashed { color: var(--muted); }
 
-.dot-plain {
+.dot-plain,
+.dot-interrupted {
   width: 8px;
   height: 8px;
   border-radius: 50%;
   background: var(--gray-dot);
 }
+/* Orca draws interrupted as a flat red dot — no icon. A run someone killed
+   with Ctrl+C, not a run that wants something. */
+.dot-interrupted { background: var(--red); }
 
 @media (prefers-reduced-motion: reduce) {
   .spin-ring { animation: none; border-top-color: var(--working); }
@@ -461,8 +472,9 @@ svg.state-icon {
 /* The state icon carries the colour on its own now — no separate state-word
    line, so this is the only per-state signal left on the card. */
 .card-state-icon { color: var(--muted); }
-.card-state-icon.working { color: var(--working); }
-.card-state-icon.attn { color: var(--amber); }
+.card-state-icon.working,
+.card-state-icon.monitoring { color: var(--working); }
+.card-state-icon.permission { color: var(--amber); }
 .card-state-icon.done { color: var(--green); }
 
 .card-head {
@@ -628,8 +640,10 @@ svg.state-icon {
 
 .agent-state .kw { color: var(--muted); font-weight: 600; }
 .agent-state.done .kw { color: var(--green); }
-.agent-state.attn .kw { color: var(--amber); }
-.agent-state.working .kw { color: var(--working); }
+.agent-state.permission .kw { color: var(--amber); }
+.agent-state.working .kw,
+.agent-state.monitoring .kw { color: var(--working); }
+.agent-state.interrupted .kw { color: var(--red); }
 
 .agent-age {
   flex: none;
@@ -985,6 +999,13 @@ svg.state-icon {
 .mock-mood-info { flex: 1; min-width: 0; }
 .mock-mood-info p { font-size: 13.5px; color: var(--muted); }
 .mock-mood-info p strong { color: var(--text); }
+/* The "commonly assumed, actually wrong" note — set apart so it doesn't read
+   as another trigger clause. */
+.mock-note {
+  border-left: 2px solid var(--border);
+  padding-left: 10px;
+  font-size: 12.5px !important;
+}
 
 .mock-oneshot #mock-bounce-btn { margin-top: 8px; }
 
