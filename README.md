@@ -4,7 +4,7 @@
 
 <p align="center">
   <a href="LICENSE"><img alt="License: MIT" src="https://img.shields.io/badge/license-MIT-blue.svg"></a>
-  <img alt="Version 0.1.1" src="https://img.shields.io/badge/version-0.1.1-orange.svg">
+  <img alt="Version 0.2.0" src="https://img.shields.io/badge/version-0.2.0-orange.svg">
 </p>
 
 A live panel of everything [Orca](https://www.onorca.dev) is running — every
