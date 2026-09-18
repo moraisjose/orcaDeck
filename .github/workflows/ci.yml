@@ -17,3 +17,11 @@ jobs:
         with:
           python-version: ${{ matrix.python-version }}
       - run: python -m unittest discover -s tests -v
+
+  panel:
+    # The panel's status ladder is plain JS with no build step, so it tests
+    # under node's own runner — no toolchain beyond the one the runner ships.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: node --test "tests/*.test.js"

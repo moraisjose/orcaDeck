@@ -73,6 +73,21 @@ html, body {
 #mascot-wrap { flex: none; }
 .mascot-wrap { position: relative; }
 
+/* Petting target. `manipulation` drops the double-tap-zoom gesture so the
+   second tap of a quick double-pet lands as a pet instead of zooming the
+   page; the other three kill iOS's grey tap flash, its long-press callout
+   menu over the SVG, and the text selection a held finger would otherwise
+   start. Together they're the difference between "a toy" and "a web page
+   that fought me". */
+#mascot-wrap {
+  cursor: pointer;
+  touch-action: manipulation;
+  -webkit-tap-highlight-color: transparent;
+  -webkit-touch-callout: none;
+  -webkit-user-select: none;
+  user-select: none;
+}
+
 .orca-mascot { width: 78px; height: 74px; overflow: visible; display: block; }
 
 /* Fixed white, always — the mascot's color no longer carries state (the
@@ -94,8 +109,21 @@ html, body {
 .orca-mascot[data-mood="attn"] .eyes-open { display: none; }
 .orca-mascot[data-mood="attn"] .eyes-worried { display: block; }
 
+/* Petting outranks every mood's eyes. These sit after the mood rules and
+   carry an extra class, so they win on both specificity and source order —
+   the mood rules are untouched and resume on their own the moment the class
+   comes off, which is the whole trick behind "it goes back to whatever it
+   was doing". */
+.orca-mascot.petted .eyes-open,
+.orca-mascot.petted .eyes-sleep,
+.orca-mascot.petted .eyes-worried { display: none; }
+.orca-mascot.petted .eyes-happy { display: block; }
+
 .zzz { display: none; }
 .orca-mascot[data-mood="idle"] .zzz { display: block; }
+/* A petted orca has its eyes open, so it is not asleep — the zzz would
+   contradict the face for those 600ms. */
+.orca-mascot.petted .zzz { display: none; }
 
 /* Movement, in the crab's own grammar: a continuous loop for a standing
    mood (working bobs, attention shivers), a short triggered hop for the
@@ -124,8 +152,28 @@ html, body {
   75% { transform: translateX(1.5px); }
 }
 
-/* One-shot: fires when the last working session lands with nothing waiting
-   — the same trigger condition as the crab's own bounce. */
+/* Petting: leans into the hand that touched it and comes back. --dir is +1
+   or -1, set by the pointer handler from which side of the mascot was hit,
+   so it leans toward your finger rather than in some fixed direction.
+   Eased rather than stepped like the hop below — a lean in hard steps reads
+   as a glitch, not as affection; the standing moods are eased for the same
+   reason. Deliberately BEFORE the hop: a session landing while you pet it
+   is information, and information wins the body. The heart and the content
+   eyes are separate elements and still show, so it hops AND looks pleased. */
+.orca-mascot.petted .rig {
+  animation: orcaNuzzle 500ms ease-in-out;
+  transform-origin: 16px 26px;
+}
+@keyframes orcaNuzzle {
+  0% { transform: rotate(0deg) translateX(0); }
+  28% { transform: rotate(calc(var(--dir, 1) * 12deg)) translateX(calc(var(--dir, 1) * 2px)); }
+  64% { transform: rotate(calc(var(--dir, 1) * 12deg)) translateX(calc(var(--dir, 1) * 2px)); }
+  100% { transform: rotate(0deg) translateX(0); }
+}
+
+/* One-shot: fires the instant any one session lands on Done — tracked per
+   worktree, so it plays on top of whatever mood is showing rather than
+   waiting for the whole deck to go quiet. */
 .orca-mascot.bounce .rig { animation: orcaHop 380ms steps(1, end) 2; }
 @keyframes orcaHop {
   0%, 100% { transform: translateY(0); }
@@ -142,6 +190,30 @@ html, body {
 @keyframes orcaChatPop {
   0%, 100% { transform: scale(1) translateY(0); }
   50% { transform: scale(1.18) translateY(-3px); }
+}
+
+/* The petting heart: drifts up and out on the side that was touched, then
+   fades. Short and diagonal so it never sits where the attention bubble
+   lives (pinned top-right, continuous) — a glance can always tell a 600ms
+   heart off to one side from a bubble that keeps pulsing in the corner. */
+.orca-heart {
+  top: -6px;
+  left: 50%;
+  width: 14px;
+  height: 12px;
+  color: var(--red);
+  opacity: 0;
+}
+.orca-heart svg { width: 100%; height: 100%; }
+.orca-heart rect { fill: currentColor; }
+.mascot-wrap.petted .orca-heart {
+  display: block;
+  animation: orcaHeartPop 600ms ease-out;
+}
+@keyframes orcaHeartPop {
+  0% { opacity: 0; transform: translate(calc(-50% + var(--dir, 1) * 8px), 0) scale(0.4); }
+  30% { opacity: 1; transform: translate(calc(-50% + var(--dir, 1) * 16px), -6px) scale(1); }
+  100% { opacity: 0; transform: translate(calc(-50% + var(--dir, 1) * 22px), -18px) scale(0.9); }
 }
 
 /* Working→Done splash: a handful of blue droplets bursting out from BELOW
@@ -176,7 +248,11 @@ html, body {
 
 @media (prefers-reduced-motion: reduce) {
   .orca-mascot .rig, .orca-mascot .tail, .orca-mascot .fins, .orca-mascot.bounce .rig,
-  .orca-chat, .orca-splash .drop { animation: none !important; }
+  .orca-mascot.petted .rig, .orca-chat, .orca-splash .drop,
+  .mascot-wrap.petted .orca-heart { animation: none !important; }
+  /* The content eyes are a display swap, not an animation, so they survive
+     this block deliberately: someone who has asked for less motion still
+     gets an answer when they touch the mascot. */
 }
 
 #clock { flex: none; text-align: right; }
@@ -243,13 +319,24 @@ svg.state-icon {
 }
 .icon-chat { color: var(--amber); }
 .icon-check { color: var(--green); }
+/* Monitoring shares working's yellow in Orca too — it IS busy, just busy
+   watching a background task rather than driving a turn; the pulse-line shape
+   is what tells the two apart. "No recent update" gets no colour at all: the
+   dashed ring already says "we can't vouch for this", and giving it a warning
+   hue would compete with the one state that genuinely wants the eye. */
+.icon-activity { color: var(--working); }
+.icon-dashed { color: var(--muted); }
 
-.dot-plain {
+.dot-plain,
+.dot-interrupted {
   width: 8px;
   height: 8px;
   border-radius: 50%;
   background: var(--gray-dot);
 }
+/* Orca draws interrupted as a flat red dot — no icon. A run someone killed
+   with Ctrl+C, not a run that wants something. */
+.dot-interrupted { background: var(--red); }
 
 @media (prefers-reduced-motion: reduce) {
   .spin-ring { animation: none; border-top-color: var(--working); }
@@ -461,8 +548,9 @@ svg.state-icon {
 /* The state icon carries the colour on its own now — no separate state-word
    line, so this is the only per-state signal left on the card. */
 .card-state-icon { color: var(--muted); }
-.card-state-icon.working { color: var(--working); }
-.card-state-icon.attn { color: var(--amber); }
+.card-state-icon.working,
+.card-state-icon.monitoring { color: var(--working); }
+.card-state-icon.permission { color: var(--amber); }
 .card-state-icon.done { color: var(--green); }
 
 .card-head {
@@ -628,8 +716,10 @@ svg.state-icon {
 
 .agent-state .kw { color: var(--muted); font-weight: 600; }
 .agent-state.done .kw { color: var(--green); }
-.agent-state.attn .kw { color: var(--amber); }
-.agent-state.working .kw { color: var(--working); }
+.agent-state.permission .kw { color: var(--amber); }
+.agent-state.working .kw,
+.agent-state.monitoring .kw { color: var(--working); }
+.agent-state.interrupted .kw { color: var(--red); }
 
 .agent-age {
   flex: none;
@@ -985,8 +1075,15 @@ svg.state-icon {
 .mock-mood-info { flex: 1; min-width: 0; }
 .mock-mood-info p { font-size: 13.5px; color: var(--muted); }
 .mock-mood-info p strong { color: var(--text); }
+/* The "commonly assumed, actually wrong" note — set apart so it doesn't read
+   as another trigger clause. */
+.mock-note {
+  border-left: 2px solid var(--border);
+  padding-left: 10px;
+  font-size: 12.5px !important;
+}
 
-.mock-oneshot #mock-bounce-btn { margin-top: 8px; }
+.mock-oneshot .chip-btn { margin-top: 8px; }
 
 .mock-ladder {
   padding: 24px 0 0;

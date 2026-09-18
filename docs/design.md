@@ -51,11 +51,29 @@ renders from: worktrees with `displayName`/`branch`/`status`/`isMainWorktree`/
 edge *is* the subagent relationship, no extra call needed. `orca terminal
 list --json` is joined in by `paneKey = tabId:leafId` to attach a
 `terminalHandle` to every agent that has a live terminal, which is what makes
-that agent remote-controllable. Each node also carries `workingMode`:
-`state: "working"` alone is not sufficient evidence of active work — Orca's
-own UI treats `workingMode: "monitoring"` as a distinct case (turn finished,
-idling/waiting) — and the panel folds that, plus `interrupted`, into
-"Needs attention".
+that agent remote-controllable. Each node also carries `workingMode` and `interrupted`, because `state` alone
+(one of `working`/`blocked`/`waiting`/`done`) doesn't separate the cases the
+panel needs. The panel reproduces Orca's own ladder rather than inventing one:
+
+| panel status | derived from | Orca's label |
+| --- | --- | --- |
+| needs attention | `state: "blocked"` or `"waiting"` | Needs attention (`permission`) |
+| working | `state: "working"` | Working |
+| monitoring | `state: "working"` + `workingMode: "monitoring"` | Monitoring background tasks |
+| interrupted | `state: "done"` + `interrupted: true` | Interrupted |
+| done | `state: "done"` | Done |
+| no recent update | any non-`done` status older than 30 min | No recent update |
+
+Two of those are easy to get wrong, and orcaDeck did get them wrong.
+`monitoring` does **not** mean "the agent asked something and is waiting" —
+Orca mints it (`claude-roster-state.js`) only when the lead turn is already
+finished *and* a background shell task or a session cron is still running,
+and groups it with working as busy. `interrupted` only ever rides
+`state: "done"` carrying `is_interrupt` from Claude's `Stop` hook, i.e. a
+human pressed Esc/Ctrl+C; it ranks below monitoring and asks for nothing.
+The 30-minute decay is Orca's `AGENT_STATUS_STALE_AFTER_MS`: a pane whose
+hook stream died stops counting as live work instead of claiming to be
+working forever.
 
 `orca account list --json` rides the same poll for its `rateLimits` block,
 projected into `state.rateLimits`: one entry per provider Orca tracks usage
