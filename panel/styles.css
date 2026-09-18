@@ -160,14 +160,24 @@ html, body {
    reason. Deliberately BEFORE the hop: a session landing while you pet it
    is information, and information wins the body. The heart and the content
    eyes are separate elements and still show, so it hops AND looks pleased. */
-.orca-mascot.petted .rig {
-  animation: orcaNuzzle 500ms ease-in-out;
-  transform-origin: 16px 26px;
-}
-@keyframes orcaNuzzle {
+.orca-mascot.petted .rig { transform-origin: 16px 26px; }
+.orca-mascot.petted.pet-right .rig { animation: orcaNuzzleRight 500ms ease-in-out; }
+.orca-mascot.petted.pet-left .rig { animation: orcaNuzzleLeft 500ms ease-in-out; }
+
+/* Two near-identical keyframe sets rather than one driven by a --dir custom
+   property. That is deliberate and must stay: custom properties inside
+   @keyframes only began working in Safari 16, and this panel's baseline is
+   iOS 10 Safari. On older WebKit the whole keyframe is dropped and the lean
+   silently does nothing — which is how this first shipped. Do not DRY these
+   back into one; tests/legacy_webkit.test.js will fail if you do. */
+@keyframes orcaNuzzleRight {
   0% { transform: rotate(0deg) translateX(0); }
-  28% { transform: rotate(calc(var(--dir, 1) * 12deg)) translateX(calc(var(--dir, 1) * 2px)); }
-  64% { transform: rotate(calc(var(--dir, 1) * 12deg)) translateX(calc(var(--dir, 1) * 2px)); }
+  28%, 64% { transform: rotate(12deg) translateX(2px); }
+  100% { transform: rotate(0deg) translateX(0); }
+}
+@keyframes orcaNuzzleLeft {
+  0% { transform: rotate(0deg) translateX(0); }
+  28%, 64% { transform: rotate(-12deg) translateX(-2px); }
   100% { transform: rotate(0deg) translateX(0); }
 }
 
@@ -199,6 +209,10 @@ html, body {
 .orca-heart {
   top: -6px;
   left: 50%;
+  /* Half the width, so the heart is centred by margin alone and every
+     keyframe below can be plain pixels — no calc(), no percentages, nothing
+     legacy WebKit has to resolve inside an animation. */
+  margin-left: -7px;
   width: 14px;
   height: 12px;
   color: var(--red);
@@ -206,21 +220,31 @@ html, body {
 }
 .orca-heart svg { width: 100%; height: 100%; }
 .orca-heart rect { fill: currentColor; }
-.mascot-wrap.petted .orca-heart {
-  display: block;
-  animation: orcaHeartPop 600ms ease-out;
+.mascot-wrap.petted .orca-heart { display: block; }
+.mascot-wrap.petted.pet-right .orca-heart { animation: orcaHeartPopRight 600ms ease-out; }
+.mascot-wrap.petted.pet-left .orca-heart { animation: orcaHeartPopLeft 600ms ease-out; }
+
+/* Mirrored pair, for the same reason as the nuzzle above. */
+@keyframes orcaHeartPopRight {
+  0% { opacity: 0; transform: translate(8px, 0) scale(0.4); }
+  30% { opacity: 1; transform: translate(16px, -6px) scale(1); }
+  100% { opacity: 0; transform: translate(22px, -18px) scale(0.9); }
 }
-@keyframes orcaHeartPop {
-  0% { opacity: 0; transform: translate(calc(-50% + var(--dir, 1) * 8px), 0) scale(0.4); }
-  30% { opacity: 1; transform: translate(calc(-50% + var(--dir, 1) * 16px), -6px) scale(1); }
-  100% { opacity: 0; transform: translate(calc(-50% + var(--dir, 1) * 22px), -18px) scale(0.9); }
+@keyframes orcaHeartPopLeft {
+  0% { opacity: 0; transform: translate(-8px, 0) scale(0.4); }
+  30% { opacity: 1; transform: translate(-16px, -6px) scale(1); }
+  100% { opacity: 0; transform: translate(-22px, -18px) scale(0.9); }
 }
 
 /* Working→Done splash: a handful of blue droplets bursting out from BELOW
    the mascot and fading, as if it had just dropped into water, on top of
    the two hops. Anchored at the wrap's bottom edge (not its center) and
    thrown outward and up — outside the silhouette, not through it. */
-.orca-splash { inset: 0; display: block; }
+/* Longhand, not `inset`: the shorthand is Safari 14.1+, and on the legacy
+   WebKit this panel targets it is dropped entirely — leaving the splash
+   container at its static position and throwing the droplets somewhere other
+   than under the mascot. Predates the petting work; same baseline, same bug. */
+.orca-splash { top: 0; right: 0; bottom: 0; left: 0; display: block; }
 .orca-splash .drop {
   position: absolute;
   top: 100%;
@@ -231,25 +255,38 @@ html, body {
   background: #4fa8e8;
   opacity: 0;
 }
-.orca-splash .drop:nth-child(1) { --dx: -24px; --dy: -12px; }
-.orca-splash .drop:nth-child(2) { --dx: 22px; --dy: -18px; }
-.orca-splash .drop:nth-child(3) { --dx: -13px; --dy: -2px; }
-.orca-splash .drop:nth-child(4) { --dx: 15px; --dy: -6px; }
-.mascot-wrap.bounce .orca-splash .drop {
-  animation: orcaSplashPop 700ms ease-out;
-}
-.orca-splash .drop:nth-child(2) { animation-delay: 40ms; }
-.orca-splash .drop:nth-child(3) { animation-delay: 80ms; }
-.orca-splash .drop:nth-child(4) { animation-delay: 20ms; }
-@keyframes orcaSplashPop {
+/* One keyframe set per droplet, rather than one set reading --dx/--dy off
+   each drop. The custom-property version was dropped wholesale by the legacy
+   WebKit this panel targets, so the splash has never played on the old iPads
+   the README promises support for. Four near-identical blocks is the price of
+   that promise — see tests/legacy_webkit.test.js. */
+.mascot-wrap.bounce .orca-splash .drop:nth-child(1) { animation: orcaSplash1 700ms ease-out; }
+.mascot-wrap.bounce .orca-splash .drop:nth-child(2) { animation: orcaSplash2 700ms ease-out 40ms; }
+.mascot-wrap.bounce .orca-splash .drop:nth-child(3) { animation: orcaSplash3 700ms ease-out 80ms; }
+.mascot-wrap.bounce .orca-splash .drop:nth-child(4) { animation: orcaSplash4 700ms ease-out 20ms; }
+@keyframes orcaSplash1 {
   0% { opacity: 1; transform: translate(-50%, -50%) translate(0, 0) scale(0.5); }
-  100% { opacity: 0; transform: translate(-50%, -50%) translate(var(--dx), var(--dy)) scale(1); }
+  100% { opacity: 0; transform: translate(-50%, -50%) translate(-24px, -12px) scale(1); }
+}
+@keyframes orcaSplash2 {
+  0% { opacity: 1; transform: translate(-50%, -50%) translate(0, 0) scale(0.5); }
+  100% { opacity: 0; transform: translate(-50%, -50%) translate(22px, -18px) scale(1); }
+}
+@keyframes orcaSplash3 {
+  0% { opacity: 1; transform: translate(-50%, -50%) translate(0, 0) scale(0.5); }
+  100% { opacity: 0; transform: translate(-50%, -50%) translate(-13px, -2px) scale(1); }
+}
+@keyframes orcaSplash4 {
+  0% { opacity: 1; transform: translate(-50%, -50%) translate(0, 0) scale(0.5); }
+  100% { opacity: 0; transform: translate(-50%, -50%) translate(15px, -6px) scale(1); }
 }
 
 @media (prefers-reduced-motion: reduce) {
   .orca-mascot .rig, .orca-mascot .tail, .orca-mascot .fins, .orca-mascot.bounce .rig,
-  .orca-mascot.petted .rig, .orca-chat, .orca-splash .drop,
-  .mascot-wrap.petted .orca-heart { animation: none !important; }
+  .orca-mascot.petted.pet-left .rig, .orca-mascot.petted.pet-right .rig,
+  .orca-chat, .orca-splash .drop,
+  .mascot-wrap.petted.pet-left .orca-heart,
+  .mascot-wrap.petted.pet-right .orca-heart { animation: none !important; }
   /* The content eyes are a display swap, not an animation, so they survive
      this block deliberately: someone who has asked for less motion still
      gets an answer when they touch the mascot. */
@@ -535,10 +572,18 @@ svg.state-icon {
   --pulse-color: var(--amber);
   --pulse-glow: rgba(254, 110, 0, 0.55);
 }
+/* The tokens above still drive the reduced-motion fallback below, which is an
+   ordinary declaration and resolves them fine. The keyframe cannot use them:
+   legacy WebKit drops a keyframe containing var() outright, which left the
+   one genuinely urgent signal on this panel — the blinking border of a
+   session waiting on a human — dead on the old iPads the README supports.
+   The literals here are --border and --amber; they have no second
+   definition anywhere (no theming), so there is nothing for them to drift
+   out of sync with. */
 
 @keyframes cardBorderPulse {
-  0%, 100% { border-color: var(--border); box-shadow: 0 0 0 0 transparent; }
-  50% { border-color: var(--pulse-color); box-shadow: 0 0 0 3px var(--pulse-glow); }
+  0%, 100% { border-color: #2c2f35; box-shadow: 0 0 0 0 transparent; }
+  50% { border-color: #fe6e00; box-shadow: 0 0 0 3px rgba(254, 110, 0, 0.55); }
 }
 
 @media (prefers-reduced-motion: reduce) {
