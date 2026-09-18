@@ -45,6 +45,27 @@
             <rect x="10.5" y="12" width="3" height="6" />
             <rect x="18.5" y="12" width="3" height="6" />
           </g>
+          <!-- Content: a smiling eye, drawn as a U — a stroke along the
+               bottom with a tick turned up at each end. Same eye boxes as
+               eyes-open (x 10-14, 18-22), so it swaps in without the face
+               shifting.
+               It is a U and not the more obvious ^ because a caret is not
+               resolvable at this size: its middle must be EMPTY along the
+               bottom, which leaves the two arms touching nothing but each
+               other's corners, and corner-only contact disappears at 78px —
+               the eye breaks into loose specks. A U puts the solid part
+               along the bottom and stands both ticks on it, so every rect
+               overlaps a neighbour by half a unit and the shape holds.
+               Kept to a thin stroke, and two units taller than eyes-sleep,
+               so a pleased squint never reads as the sleeping face. -->
+          <g class="eyes eyes-happy">
+            <rect x="10" y="14" width="1" height="2.5" />
+            <rect x="13" y="14" width="1" height="2.5" />
+            <rect x="10" y="15.5" width="4" height="1" />
+            <rect x="18" y="14" width="1" height="2.5" />
+            <rect x="21" y="14" width="1" height="2.5" />
+            <rect x="18" y="15.5" width="4" height="1" />
+          </g>
           <g class="zzz">
             <rect x="22" y="2" width="3" height="2" />
             <rect x="26" y="0" width="2" height="2" />
@@ -57,6 +78,21 @@
            used everywhere else, floating beside the mascot so the mood is
            unmissable at a glance, not just a subtle shiver + eye shape. -->
       <div id="orca-chat" class="orca-decoration orca-chat"></div>
+
+      <!-- Petting decoration: a small heart drifting up off whichever side
+           was touched (--dir, set on the wrap by the pointer handler). Drawn
+           as blocky rects rather than a smooth icon so it belongs to the same
+           pixel-art as the mascot itself. -->
+      <div id="orca-heart" class="orca-decoration orca-heart" aria-hidden="true">
+        <svg viewBox="0 0 7 6" shape-rendering="crispEdges" xmlns="http://www.w3.org/2000/svg">
+          <rect x="1" y="0" width="2" height="1" />
+          <rect x="4" y="0" width="2" height="1" />
+          <rect x="0" y="1" width="7" height="2" />
+          <rect x="1" y="3" width="5" height="1" />
+          <rect x="2" y="4" width="3" height="1" />
+          <rect x="3" y="5" width="1" height="1" />
+        </svg>
+      </div>
 
       <!-- Working→Done splash: a handful of blue droplets that pop out and
            fade during the one-shot bounce, on top of the two hops. -->
@@ -144,6 +180,18 @@
         </div>
       </section>
 
+      <section class="mock-mood mock-oneshot">
+        <div class="mock-mood-preview" data-mood="working" data-pet-target></div>
+        <div class="mock-mood-info">
+          <h2>Petting (one-shot, on top of any mood)</h2>
+          <p><strong>Trigger:</strong> someone touches or clicks the mascot. Purely a reaction to a human — it reflects nothing about any session, and it fires whatever the mascot is currently doing.</p>
+          <p><strong>Looks like:</strong> it leans into the side you touched, its eyes turn content (<code>^ ^</code>), and a small heart drifts up off that same side. Every preview on this page is a live mascot — pet any of them.</p>
+          <p><strong>Duration:</strong> ~600ms one-shot. The mood is never changed, only briefly overridden, so it goes straight back to working, needs-attention, done or asleep on its own — there is no state to restore. Petting again mid-flight restarts cleanly.</p>
+          <p class="mock-note">Under <code>prefers-reduced-motion</code> the lean and the heart are silent like the rest of the mascot, but the content eyes still swap in — asking for less motion shouldn't mean touching it does nothing.</p>
+          <button type="button" id="mock-pet-btn" class="chip-btn">Play it</button>
+        </div>
+      </section>
+
       <section class="mock-ladder">
         <h2>The priority ladder</h2>
         <p>Checked top to bottom, every poll — the first match wins, exactly like Clawdeck's own crab mood ladder:</p>
@@ -155,7 +203,7 @@
           <li>Zero agents running anywhere at all → <strong>Idle</strong></li>
           <li>Otherwise (only finished sessions) → <strong>Done</strong></li>
         </ol>
-        <p>The Bounce is deliberately <em>not</em> on this ladder — it's a one-shot event fired per worktree, so it still plays while the mascot is showing any other mood.</p>
+        <p>Neither one-shot is on this ladder. The Bounce is an event fired per worktree and Petting is a response to a human, so both play on top of whichever mood the ladder settled on.</p>
 
         <h2>Per-session statuses</h2>
         <p>Cards and agent rows use Orca's own status ladder rather than the four moods above, in Orca's own order — read out of its <code>worktree-status.js</code>:</p>

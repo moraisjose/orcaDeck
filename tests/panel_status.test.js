@@ -128,3 +128,23 @@ test("a deck whose only busy session is monitoring is not in attention", () => {
   });
   assert.equal(mood, "working");
 });
+
+// ---------------------------------------------------------------- petting
+
+// The only pure logic in the petting reaction: which way to lean. Everything
+// else it does is a CSS class the browser animates.
+test("the mascot leans toward the side that was touched", () => {
+  const root = { getBoundingClientRect: () => ({ left: 100, width: 80 }) };
+  assert.equal(panel.petDirection(root, { clientX: 110 }), -1, "left half leans left");
+  assert.equal(panel.petDirection(root, { clientX: 170 }), 1, "right half leans right");
+  assert.equal(panel.petDirection(root, { clientX: 140 }), 1, "dead centre resolves right");
+});
+
+test("a pet with no coordinates still picks a direction", () => {
+  // The mock page's button and any synthesised click arrive without clientX;
+  // a NaN here would silently break the whole animation via calc().
+  const root = { getBoundingClientRect: () => ({ left: 100, width: 80 }) };
+  assert.equal(panel.petDirection(root, null), 1);
+  assert.equal(panel.petDirection(root, {}), 1);
+  assert.equal(panel.petDirection({ getBoundingClientRect: () => ({ left: 0, width: 0 }) }, { clientX: 5 }), 1);
+});

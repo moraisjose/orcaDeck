@@ -832,6 +832,52 @@ function setMascotMood(root, mood) {
 // animationend listener so a second trigger mid-flight cleanly restarts
 // rather than leaving stale classes — which is no longer rare now that any
 // session finishing fires it, not just the last one on the whole deck.
+// Which way to lean, from where the mascot was actually touched: -1 for the
+// left half, +1 for the right, so it tips toward the finger. A trigger with
+// no coordinates (the mock page's button, a keyboard-synthesised click)
+// falls back to +1 rather than guessing.
+function petDirection(root, ev) {
+  if (!ev || typeof ev.clientX !== "number") return 1;
+  const box = root.getBoundingClientRect();
+  if (!box.width) return 1;
+  return ev.clientX < box.left + box.width / 2 ? -1 : 1;
+}
+
+// The petting reaction: lean, content eyes, one heart. Nothing here touches
+// data-mood, so there is no state to save and none to restore — dropping the
+// class hands the mascot straight back to whichever mood loop it was already
+// running. Same timer shape as the bounce below, and for the same reason: a
+// second pet mid-flight restarts cleanly instead of being swallowed by a
+// still-running animation.
+const PET_MS = 620;
+
+function triggerMascotPet(root, ev) {
+  const front = root.querySelector(".orca-front");
+  root.style.setProperty("--dir", String(petDirection(root, ev)));
+
+  // Forced reflow between the removal and the re-add: without it the browser
+  // coalesces both into one frame, sees no change, and lets the in-flight
+  // animation run on — so a rapid second tap would do nothing at all.
+  root.classList.remove("petted");
+  if (front) front.classList.remove("petted");
+  void root.offsetWidth;
+  root.classList.add("petted");
+  if (front) front.classList.add("petted");
+
+  clearTimeout(root._petTimer);
+  root._petTimer = setTimeout(() => {
+    root.classList.remove("petted");
+    if (front) front.classList.remove("petted");
+  }, PET_MS);
+}
+
+// pointerdown, not click: it lands on finger-down instead of waiting for the
+// lift, which is the difference between a toy that answers and one that
+// lags. One handler covers mouse, touch and pen.
+function wirePet(root) {
+  root.addEventListener("pointerdown", (ev) => triggerMascotPet(root, ev));
+}
+
 function triggerMascotBounce(root) {
   const front = root.querySelector(".orca-front");
   root.classList.add("bounce");
@@ -950,6 +996,8 @@ async function poll() {
 }
 
 function wireControls() {
+  wirePet(document.getElementById("mascot-wrap"));
+
   document.getElementById("filter-chip").addEventListener("click", (ev) => {
     const idx = FILTER_MODES.indexOf(filterMode);
     filterMode = FILTER_MODES[(idx + 1) % FILTER_MODES.length];
@@ -991,10 +1039,15 @@ function initPuppyMock() {
     clone.removeAttribute("id");
     clone.querySelectorAll("[id]").forEach((el) => el.removeAttribute("id"));
     setMascotMood(clone, slot.dataset.mood);
+    wirePet(clone);
     slot.appendChild(clone);
     if ("bounceTarget" in slot.dataset) {
       const btn = document.getElementById("mock-bounce-btn");
       btn.addEventListener("click", () => triggerMascotBounce(clone));
+    }
+    if ("petTarget" in slot.dataset) {
+      const btn = document.getElementById("mock-pet-btn");
+      btn.addEventListener("click", (ev) => triggerMascotPet(clone, ev));
     }
   });
 }
@@ -1146,5 +1199,6 @@ if (typeof module !== "undefined") {
     computeMood,
     consumeFinishedWorktrees,
     prevBandByWorktree,
+    petDirection,
   };
 }
