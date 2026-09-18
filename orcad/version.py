@@ -2,4 +2,4 @@
 prints it at startup) and server.py (the HTTP `Server` header) can import it
 without either importing the other."""
 
-VERSION = "0.2.0"
+VERSION = "0.2.1"
